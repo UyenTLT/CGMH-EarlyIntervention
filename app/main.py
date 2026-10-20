@@ -48,6 +48,10 @@ class PasswordReset(BaseModel):
     password: str
 
 
+class DeleteRecordsRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=5000)
+
+
 class ClassifyRequest(BaseModel):
     text: str = Field(max_length=50000)
 
@@ -332,6 +336,17 @@ def save_records_bulk(records: list[Record]):
     if saved:
         write_records(rows)
     return {"saved": len(saved), "skipped": skipped, "records": saved}
+
+
+@app.post("/api/records/bulk-delete", dependencies=[Depends(auth)])
+def delete_records_bulk(body: DeleteRecordsRequest):
+    selected = set(body.ids)
+    rows = read_records()
+    kept = [row for row in rows if str(row.get("id")) not in selected]
+    deleted = len(rows) - len(kept)
+    if deleted:
+        write_records(kept)
+    return {"deleted": deleted}
 
 
 @app.post("/api/import-cases", dependencies=[Depends(auth)])

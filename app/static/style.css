@@ -75,3 +75,7 @@ body:has(#login:not([hidden])){background:radial-gradient(ellipse at 15% 16%,#f8
 .case-dropzone .import-button:hover{background:#fff1e3}
 .record-tools{flex-wrap:wrap}
 @media(max-width:700px){.record-tools .search{flex-basis:100%}.case-dropzone{width:100%;justify-content:space-between;white-space:normal}.case-dropzone>span:nth-child(2){flex:1}}
+.delete-selected{border-color:#eccdca;color:#a6443e;background:#fff9f8}
+.delete-selected:hover:not(:disabled){border-color:#d6948f;color:#8f302b;background:#fff0ee}
+.delete-selected:disabled{opacity:.45;cursor:default}
+@media(max-width:650px){.export-controls .delete-selected{order:2}.export-controls #export{order:4}}
