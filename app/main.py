@@ -87,7 +87,40 @@ def _verify_password(password: str, encoded: str) -> bool:
         return False
 
 
+def _database_url() -> str | None:
+    return os.environ.get("DATABASE_URL")
+
+
+def _pg_get(key: str):
+    import psycopg
+    url = _database_url()
+    with psycopg.connect(url.replace("postgres://", "postgresql://", 1)) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_state (key text PRIMARY KEY, value jsonb NOT NULL)")
+        row = conn.execute("SELECT value FROM app_state WHERE key = %s", (key,)).fetchone()
+        return row[0] if row else None
+
+
+def _pg_set(key: str, value: Any):
+    import psycopg
+    from psycopg.types.json import Jsonb
+    url = _database_url()
+    with psycopg.connect(url.replace("postgres://", "postgresql://", 1)) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_state (key text PRIMARY KEY, value jsonb NOT NULL)")
+        conn.execute(
+            "INSERT INTO app_state (key, value) VALUES (%s, %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            (key, Jsonb(value)),
+        )
+
+
 def load_users() -> list[dict[str, str]]:
+    if _database_url():
+        users = _pg_get("users")
+        if users is not None:
+            return users
+        initial = [{"username": ADMIN_USERNAME, "role": "admin", "passwordHash": _password_hash(ADMIN_PASSWORD)}]
+        _pg_set("users", initial)
+        return initial
     if USERS_DB.exists():
         return json.loads(USERS_DB.read_text())
     initial = [{"username": ADMIN_USERNAME, "role": "admin", "passwordHash": _password_hash(ADMIN_PASSWORD)}]
@@ -96,6 +129,9 @@ def load_users() -> list[dict[str, str]]:
 
 
 def save_users(users: list[dict[str, str]]):
+    if _database_url():
+        _pg_set("users", users)
+        return
     USERS_DB.write_text(json.dumps(users, ensure_ascii=False, indent=2))
 
 
@@ -115,10 +151,15 @@ def admin_auth(user: dict[str, str] = Depends(auth)) -> dict[str, str]:
 
 
 def read_records() -> list[dict[str, Any]]:
+    if _database_url():
+        return _pg_get("records") or []
     return json.loads(DB.read_text()) if DB.exists() else []
 
 
 def write_records(rows: list[dict[str, Any]]):
+    if _database_url():
+        _pg_set("records", rows)
+        return
     DB.write_text(json.dumps(rows, ensure_ascii=False, indent=2))
 
 

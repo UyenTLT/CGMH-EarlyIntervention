@@ -9,3 +9,4 @@ pillow>=10,<12
 pytesseract>=0.3.13,<1
 pdf2image>=1.17,<2
 reportlab>=4.2,<5
+psycopg[binary]>=3.2,<4

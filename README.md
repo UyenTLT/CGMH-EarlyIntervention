@@ -17,9 +17,9 @@ Open http://127.0.0.1:8000. First-run administrator sign-in: `admin` / `demo1234
 
 ## Public test deployment (Render)
 
-`render.yaml` defines a free Singapore web service. To publish it, push this app directory to a GitHub repository, choose **New + → Blueprint** in Render, and connect that repository. Render generates the `ADMIN_PASSWORD`; find it in the service environment settings and share it only with testers who need the admin login. The username is `testadmin`.
+`render.yaml` defines a free Singapore web service and a linked PostgreSQL database. Push this app to GitHub, then choose **New + → Blueprint** in Render and connect the repository. Render generates the `ADMIN_PASSWORD`; find it in the service environment settings and share it only with testers who need the admin login. The username is `testadmin`.
 
-The hosted version uses temporary storage under `/tmp`, so records and accounts may be cleared when Render restarts or redeploys the service. The local `app/data/records.json` and `app/data/users.json` are ignored by Git and are not deployed. The public page warns testers to use synthetic data only. Do not enter real patient information.
+When `DATABASE_URL` is set, the app stores accounts and records in PostgreSQL; without it, local development uses the JSON files. The free Render PostgreSQL plan is intended for temporary testing and expires after 30 days, so upgrade the database plan before relying on long-term storage. The local JSON files are ignored by Git and are not deployed. The public page warns testers to use synthetic data only. Do not enter real patient information.
 
 ## Architecture and API
 
