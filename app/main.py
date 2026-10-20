@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import io, json, secrets, hashlib, hmac, re, os
+import io, json, secrets, hashlib, hmac, re, os, csv
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -337,16 +337,83 @@ def save_records_bulk(records: list[Record]):
 @app.post("/api/import-cases", dependencies=[Depends(auth)])
 async def import_cases(file: UploadFile = File(...)):
     name = (file.filename or "").lower()
-    if not name.endswith(".xlsx"):
-        raise HTTPException(415, "Choose an .xlsx workbook")
+    extension = Path(name).suffix
+    if extension not in {".xlsx", ".csv", ".txt"}:
+        raise HTTPException(415, "Choose an .xlsx, .csv, or .txt file")
     raw = await file.read()
     if len(raw) > 30 * 1024 * 1024:
-        raise HTTPException(413, "Workbook exceeds 30 MB limit")
-    try:
-        from openpyxl import load_workbook
-        workbook = load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
-    except Exception as exc:
-        raise HTTPException(422, "Could not read the Excel workbook") from exc
+        raise HTTPException(413, "Import file exceeds 30 MB limit")
+    datasets: list[tuple[str, list[tuple[Any, ...]]]] = []
+    if extension == ".xlsx":
+        try:
+            from openpyxl import load_workbook
+            workbook = load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
+            datasets = [(sheet.title, list(sheet.iter_rows(values_only=True))) for sheet in workbook.worksheets]
+            workbook.close()
+        except Exception as exc:
+            raise HTTPException(422, "Could not read the Excel workbook") from exc
+    else:
+        text = None
+        for encoding in ("utf-8-sig", "utf-16", "cp950", "cp1252"):
+            try:
+                text = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            raise HTTPException(422, "Could not decode the text file; save it as UTF-8 and try again")
+        if extension == ".csv":
+            try:
+                dialect = csv.Sniffer().sniff(text[:8192], delimiters=",\t;|")
+            except csv.Error:
+                dialect = csv.excel
+            table = [tuple(row) for row in csv.reader(io.StringIO(text), dialect) if any(str(cell).strip() for cell in row)]
+            datasets = [(Path(name).stem or "CSV", table)]
+        else:
+            lines = text.splitlines()
+            first_content = next((line for line in lines if line.strip()), "")
+            try:
+                dialect = csv.Sniffer().sniff(text[:8192], delimiters="\t,;|")
+                table = [tuple(row) for row in csv.reader(io.StringIO(text), dialect) if any(str(cell).strip() for cell in row)]
+            except csv.Error:
+                table = []
+            header_probe = re.sub(r"[^a-z0-9]+", " ", first_content.casefold()).strip()
+            if table and re.search(r"\bcase\s*(?:id|no|number)\b", header_probe):
+                datasets = [(Path(name).stem or "TXT", table)]
+            else:
+                fields = {"case": "Case ID", "patient": "Patient Name", "chart": "Chart No", "diagnosis": "Diagnosis", "date": "Exam Date", "physician": "Physician"}
+                label_patterns = {
+                    "case": re.compile(r"^\s*(?:case\s*(?:id|no\.?|number)|caseid)\s*[:：=]\s*(.*)$", re.I),
+                    "patient": re.compile(r"^\s*(?:patient(?:\s*name)?|name|病患姓名|姓名)\s*[:：=]\s*(.*)$", re.I),
+                    "chart": re.compile(r"^\s*(?:chart\s*(?:no\.?|number)|medical\s*record\s*(?:no\.?|number)|病歷號碼?|病歷編號)\s*[:：=]\s*(.*)$", re.I),
+                    "diagnosis": re.compile(r"^\s*(?:clinical\s*)?diagnosis(?:\s*(?:text|summary))?\s*[:：=]\s*(.*)$|^\s*診斷(?:內容)?\s*[:：=]\s*(.*)$", re.I),
+                    "date": re.compile(r"^\s*(?:exam(?:ination)?\s*date|date|檢查日期)\s*[:：=]\s*(.*)$", re.I),
+                    "physician": re.compile(r"^\s*(?:physician|doctor|醫師)\s*[:：=]\s*(.*)$", re.I),
+                }
+                records, current = [], {}
+                for line in lines + [""]:
+                    stripped = line.strip()
+                    if not stripped:
+                        if current.get("Case ID"):
+                            records.append(tuple(current.get(fields[key], "") for key in fields))
+                        current = {}
+                        continue
+                    matched = False
+                    for key, pattern in label_patterns.items():
+                        match = pattern.match(stripped)
+                        if not match:
+                            continue
+                        if key == "case" and current.get("Case ID"):
+                            records.append(tuple(current.get(fields[field], "") for field in fields))
+                            current = {}
+                        value = next((part for part in match.groups() if part is not None), "").strip()
+                        header = fields[key]
+                        current[header] = f"{current[header]} {value}".strip() if key == "diagnosis" and current.get(header) else value
+                        matched = True
+                        break
+                    if not matched and current.get("Diagnosis"):
+                        current["Diagnosis"] = f"{current['Diagnosis']} {stripped}".strip()
+                datasets = [(Path(name).stem or "TXT", [tuple(fields.values()), *records])]
     from app.classifier import classify_text
     existing = read_records()
     known_case_ids = {row.get("caseId") for row in existing if row.get("caseId")}
@@ -361,12 +428,11 @@ async def import_cases(file: UploadFile = File(...)):
     }
     def norm_header(value: Any) -> str:
         return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", str(value or "").strip().casefold()).strip()
-    for sheet in workbook.worksheets:
-        iterator = sheet.iter_rows(values_only=True)
-        try:
-            raw_headers = list(next(iterator))
-        except StopIteration:
+    for sheet_title, table in datasets:
+        if not table:
             continue
+        raw_headers = list(table[0])
+        iterator = iter(table[1:])
         headers = [norm_header(value) for value in raw_headers]
         columns = {key: next((i for i, header in enumerate(headers) if header in values), None) for key, values in aliases.items()}
         if columns["case"] is None:
@@ -405,7 +471,7 @@ async def import_cases(file: UploadFile = File(...)):
             codes = [suggestion["value"] for suggestion in result["suggestions"]]
             labels = [suggestion["label"] for suggestion in result["suggestions"]]
             for case_value in case_values:
-                case_id = f"{sheet.title}-{case_value}"
+                case_id = f"{sheet_title}-{case_value}"
                 if case_id in known_case_ids:
                     skipped += 1
                     continue
@@ -422,9 +488,8 @@ async def import_cases(file: UploadFile = File(...)):
                     suggested_count += 1
                 else:
                     review_count += 1
-    workbook.close()
     if not found_case_sheet:
-        raise HTTPException(422, "No worksheet with a CASE ID column was found")
+        raise HTTPException(422, "No table with a CASE ID column was found")
     return {"imported": len(created), "skipped": skipped, "suggested": suggested_count, "needsReview": review_count, "records": created}
 
 

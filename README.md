@@ -40,7 +40,7 @@ When `DATABASE_URL` is set, the app stores accounts and records in PostgreSQL; w
 | POST | `/api/classify` | Signed-in users: suggest diagnosis checklist items from text; uncertain/negated mentions are returned separately |
 | GET | `/api/records` | List records |
 | POST | `/api/records` | Create/update a reviewed record |
-| POST | `/api/import-cases` | Import each non-empty `CASE ID` + `Diagnosis` row from workbook sheets as its own record; repeat imports skip known case IDs |
+| POST | `/api/import-cases` | Import `.xlsx`, `.csv`, and `.txt` case data; tabular files need a `CASE ID` header, and labeled TXT blocks can use `Case ID:` / `Diagnosis:`; each case is a separate preview record, and repeat imports skip known case IDs |
 | DELETE | `/api/records/{id}` | Delete a record |
 | POST | `/api/extract` | Extract text from an uploaded document for clinician review |
 | GET | `/api/export?format=xlsx&ids=...` | Download selected records (or all when no IDs are supplied) as `.xlsx`, `.docx`, or `.pdf`; repeat `ids` for multiple records |

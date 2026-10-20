@@ -68,3 +68,10 @@ body:has(#login:not([hidden])){background:radial-gradient(ellipse at 15% 16%,#f8
 @media(max-width:650px){.pending-import-bar{align-items:flex-start;flex-wrap:wrap}.pending-import-bar span{flex-basis:100%}}
 .public-demo-banner{margin:0 0 14px;padding:9px 12px;border:1px solid #e6c695;border-left:4px solid #b86c32;background:#fff8ed;color:#77562e;font-size:10px;font-weight:650;letter-spacing:.01em}
 .login-card .public-demo-banner{margin:0 0 14px;text-align:left;font-size:9px;line-height:1.5}
+.case-dropzone{min-height:42px;display:flex;align-items:center;gap:9px;padding:5px 7px 5px 11px;border:1px dashed #d9b38d;background:#fffaf4;color:#805a3a;font-size:10px;white-space:nowrap;transition:background .15s,border-color .15s}
+.case-dropzone.dragging{border-color:#ac612d;background:#fff0df;box-shadow:inset 0 0 0 1px #e5bd98}
+.drop-arrow{font-size:16px;color:#af642f;font-weight:700}
+.case-dropzone .import-button{padding:7px 10px;border-color:#e5c9ad;background:#fff;color:#8d552c;font-size:10px}
+.case-dropzone .import-button:hover{background:#fff1e3}
+.record-tools{flex-wrap:wrap}
+@media(max-width:700px){.record-tools .search{flex-basis:100%}.case-dropzone{width:100%;justify-content:space-between;white-space:normal}.case-dropzone>span:nth-child(2){flex:1}}
