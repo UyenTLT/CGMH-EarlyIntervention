@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: chang-gung-rehab-checklist-demo
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.9
+      - key: ADMIN_USERNAME
+        value: testadmin
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: HOSPITAL_DATA_DIR
+        value: /tmp/hospital-checklist-demo-data
