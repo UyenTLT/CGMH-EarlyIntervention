@@ -119,3 +119,10 @@ body:has(#login:not([hidden])){background:radial-gradient(ellipse at 15% 16%,#f8
 #records .records-table td:nth-child(6),#records .records-table th:nth-child(6){width:auto;min-width:0;max-width:none}
 #records .records-table td:nth-child(2) b{max-width:100%;white-space:normal;overflow-wrap:anywhere}
 #records .records-table td:nth-child(6){overflow-wrap:anywhere}
+
+.records-pagination{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:12px;color:var(--muted);font-size:10px}
+.records-pagination select{height:32px;border:1px solid #dfe8e7;background:#fff;color:var(--ink);padding:0 8px}
+.records-pagination button{min-width:32px;height:32px;padding:0 8px}
+.records-pagination button:disabled{opacity:.45;cursor:default}
+#pageInfo{min-width:120px;text-align:center}
+@media(max-width:650px){.records-pagination{justify-content:flex-start;flex-wrap:wrap}}
