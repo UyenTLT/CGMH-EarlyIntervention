@@ -86,3 +86,14 @@ body:has(#login:not([hidden])){background:radial-gradient(ellipse at 15% 16%,#f8
 #recordRows td:nth-child(2) .record-id{max-width:175px;overflow-wrap:anywhere}
 #recordRows td:nth-child(6) .tag{white-space:normal;line-height:1.35}
 @media(max-width:700px){#recordRows th:nth-child(2),#recordRows td:nth-child(2){min-width:115px;width:22%}#recordRows th:nth-child(6),#recordRows td:nth-child(6){min-width:280px;width:50%}}
+/* Fixed column proportions for the records grid. */
+#records .table-wrap table{table-layout:fixed;min-width:1120px}
+#records .table-wrap th:nth-child(1),#records .table-wrap td:nth-child(1){width:42px}
+#records .table-wrap th:nth-child(2),#records .table-wrap td:nth-child(2){width:145px;min-width:145px;max-width:145px}
+#records .table-wrap th:nth-child(3),#records .table-wrap td:nth-child(3){width:115px}
+#records .table-wrap th:nth-child(4),#records .table-wrap td:nth-child(4){width:120px}
+#records .table-wrap th:nth-child(5),#records .table-wrap td:nth-child(5){width:120px}
+#records .table-wrap th:nth-child(6),#records .table-wrap td:nth-child(6){width:500px;min-width:500px;max-width:none}
+#records .table-wrap th:nth-child(7),#records .table-wrap td:nth-child(7){width:115px}
+#records .table-wrap td:nth-child(2) b{max-width:125px}
+#records .table-wrap td:nth-child(6){font-size:11px}
