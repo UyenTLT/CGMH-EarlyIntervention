@@ -7,7 +7,7 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
@@ -305,6 +305,18 @@ def reset_user_password(username: str, body: PasswordReset, current: dict[str, s
         if owner == target["username"]:
             TOKENS.pop(token, None)
     return {"ok": True}
+
+
+@app.get("/api/health")
+def health():
+    """Non-sensitive deployment check for persistence configuration."""
+    if not _database_url():
+        return {"ok": True, "backend": "json", "persistent": False, "message": "DATABASE_URL is not configured"}
+    try:
+        rows = read_records()
+        return {"ok": True, "backend": "postgresql", "persistent": True, "records": len(rows)}
+    except Exception as exc:
+        return JSONResponse(status_code=503, content={"ok": False, "backend": "postgresql", "persistent": False, "message": "Database connection unavailable"})
 
 
 @app.get("/api/records", dependencies=[Depends(auth)])
