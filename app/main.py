@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import io, json, secrets, hashlib, hmac, re, os, csv
+import io, json, secrets, hashlib, hmac, re, os, csv, threading, time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,9 @@ DIAGNOSIS_GROUPS = {
 app = FastAPI(title="Hospital Checklist Prototype")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 TOKENS: dict[str, str] = {}
+STATE_LOCK = threading.RLock()
+_PG_SCHEMA_READY = False
+_PG_SCHEMA_LOCK = threading.Lock()
 
 
 class Login(BaseModel):
@@ -98,61 +101,112 @@ def _database_url() -> str | None:
 def _pg_get(key: str):
     import psycopg
     url = _database_url()
-    with psycopg.connect(url.replace("postgres://", "postgresql://", 1)) as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS app_state (key text PRIMARY KEY, value jsonb NOT NULL)")
-        row = conn.execute("SELECT value FROM app_state WHERE key = %s", (key,)).fetchone()
-        return row[0] if row else None
+    if not url:
+        return None
+    _pg_ensure_schema(url)
+    try:
+        with psycopg.connect(url.replace("postgres://", "postgresql://", 1), connect_timeout=10) as conn:
+            row = conn.execute("SELECT value FROM app_state WHERE key = %s", (key,)).fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        raise HTTPException(503, "Database connection unavailable") from exc
 
 
 def _pg_set(key: str, value: Any):
     import psycopg
     from psycopg.types.json import Jsonb
     url = _database_url()
-    with psycopg.connect(url.replace("postgres://", "postgresql://", 1)) as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS app_state (key text PRIMARY KEY, value jsonb NOT NULL)")
-        conn.execute(
-            "INSERT INTO app_state (key, value) VALUES (%s, %s) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-            (key, Jsonb(value)),
-        )
+    if not url:
+        return
+    _pg_ensure_schema(url)
+    try:
+        with psycopg.connect(url.replace("postgres://", "postgresql://", 1), connect_timeout=10) as conn:
+            conn.execute(
+                "INSERT INTO app_state (key, value) VALUES (%s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (key, Jsonb(value)),
+            )
+    except Exception as exc:
+        raise HTTPException(503, "Database connection unavailable") from exc
+
+
+def _pg_ensure_schema(url: str):
+    global _PG_SCHEMA_READY
+    if _PG_SCHEMA_READY:
+        return
+    with _PG_SCHEMA_LOCK:
+        if _PG_SCHEMA_READY:
+            return
+        import psycopg
+        try:
+            with psycopg.connect(url.replace("postgres://", "postgresql://", 1), connect_timeout=10) as conn:
+                conn.execute("CREATE TABLE IF NOT EXISTS app_state (key text PRIMARY KEY, value jsonb NOT NULL)")
+            _PG_SCHEMA_READY = True
+        except Exception as exc:
+            raise HTTPException(503, "Database connection unavailable") from exc
+
+
+def _initial_admin() -> dict[str, str]:
+    return {"username": ADMIN_USERNAME, "role": "admin", "passwordHash": _password_hash(ADMIN_PASSWORD)}
+
+
+def _json_read(path: Path, default: Any):
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        try:
+            corrupt = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
+            os.replace(path, corrupt)
+        except OSError:
+            pass
+        return default
+
+
+def _json_write(path: Path, value: Any):
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def load_users() -> list[dict[str, str]]:
-    initial = {"username": ADMIN_USERNAME, "role": "admin", "passwordHash": _password_hash(ADMIN_PASSWORD)}
-    if _database_url():
-        users = _pg_get("users")
-        if users is None:
-            users = [initial]
-            _pg_set("users", users)
+    with STATE_LOCK:
+        if _database_url():
+            users = _pg_get("users")
+            if users is None:
+                users = [_initial_admin()]
+                _pg_set("users", users)
+                return users
+            # Keep the configured admin login available after a Render restart
+            # without re-hashing its password on every authenticated request.
+            if not any(user.get("username") == ADMIN_USERNAME for user in users):
+                users.append(_initial_admin())
+                _pg_set("users", users)
             return users
-        # Keep the configured admin login available after a Render restart or
-        # an existing database created with an older ADMIN_USERNAME value.
+        users = _json_read(USERS_DB, None)
+        if users is None:
+            users = [_initial_admin()]
+            _json_write(USERS_DB, users)
+            return users
         if not any(user.get("username") == ADMIN_USERNAME for user in users):
-            users.append(initial)
-            _pg_set("users", users)
+            users.append(_initial_admin())
+            _json_write(USERS_DB, users)
         return users
-    if USERS_DB.exists():
-        users = json.loads(USERS_DB.read_text())
-        if not any(user.get("username") == ADMIN_USERNAME for user in users):
-            users.append(initial)
-            USERS_DB.write_text(json.dumps(users, ensure_ascii=False, indent=2))
-        return users
-    users = [initial]
-    USERS_DB.write_text(json.dumps(users, ensure_ascii=False, indent=2))
-    return users
 
 
 def save_users(users: list[dict[str, str]]):
-    if _database_url():
-        _pg_set("users", users)
-        return
-    USERS_DB.write_text(json.dumps(users, ensure_ascii=False, indent=2))
+    with STATE_LOCK:
+        if _database_url():
+            _pg_set("users", users)
+            return
+        _json_write(USERS_DB, users)
 
 
 def auth(authorization: str | None = Header(default=None)) -> dict[str, str]:
     token = authorization.removeprefix("Bearer ") if authorization else ""
     username = TOKENS.get(token)
-    user = next((u for u in load_users() if u["username"] == username), None)
+    user = next((u for u in load_users() if u.get("username") == username), None)
     if user is None:
         raise HTTPException(401, "Sign in required")
     return user
@@ -165,16 +219,18 @@ def admin_auth(user: dict[str, str] = Depends(auth)) -> dict[str, str]:
 
 
 def read_records() -> list[dict[str, Any]]:
-    if _database_url():
-        return _pg_get("records") or []
-    return json.loads(DB.read_text()) if DB.exists() else []
+    with STATE_LOCK:
+        if _database_url():
+            return _pg_get("records") or []
+        return _json_read(DB, [])
 
 
 def write_records(rows: list[dict[str, Any]]):
-    if _database_url():
-        _pg_set("records", rows)
-        return
-    DB.write_text(json.dumps(rows, ensure_ascii=False, indent=2))
+    with STATE_LOCK:
+        if _database_url():
+            _pg_set("records", rows)
+            return
+        _json_write(DB, rows)
 
 
 def extract_basic_fields(text: str) -> dict[str, str]:
@@ -227,7 +283,7 @@ def diagnosis_data_script():
 @app.post("/api/login")
 def login(body: Login):
     username = body.username.strip().lower()
-    user = next((u for u in load_users() if u["username"] == username), None)
+    user = next((u for u in load_users() if u.get("username") == username), None)
     if user is None or not _verify_password(body.password, user["passwordHash"]):
         raise HTTPException(401, "Invalid username or password")
     token = secrets.token_urlsafe(32)
@@ -265,26 +321,28 @@ def create_user(body: NewUser):
         raise HTTPException(422, "Password must contain at least 8 characters")
     if body.role not in {"admin", "user"}:
         raise HTTPException(422, "Role must be admin or user")
-    rows = load_users()
-    if any(u["username"] == username for u in rows):
-        raise HTTPException(409, "Username already exists")
-    rows.append({"username": username, "role": body.role, "passwordHash": _password_hash(body.password)})
-    save_users(rows)
+    with STATE_LOCK:
+        rows = load_users()
+        if any(u.get("username") == username for u in rows):
+            raise HTTPException(409, "Username already exists")
+        rows.append({"username": username, "role": body.role, "passwordHash": _password_hash(body.password)})
+        save_users(rows)
     return {"username": username, "role": body.role}
 
 
 @app.delete("/api/users/{username}")
 def delete_user(username: str, current: dict[str, str] = Depends(admin_auth)):
     username = username.lower()
-    rows = load_users()
-    target = next((u for u in rows if u["username"] == username), None)
-    if target is None:
-        raise HTTPException(404, "Account not found")
-    if username == current["username"]:
-        raise HTTPException(400, "You cannot remove your own account")
-    if target["role"] == "admin" and sum(u["role"] == "admin" for u in rows) <= 1:
-        raise HTTPException(400, "At least one administrator account must remain")
-    save_users([u for u in rows if u["username"] != username])
+    with STATE_LOCK:
+        rows = load_users()
+        target = next((u for u in rows if u.get("username") == username), None)
+        if target is None:
+            raise HTTPException(404, "Account not found")
+        if username == current["username"]:
+            raise HTTPException(400, "You cannot remove your own account")
+        if target.get("role") == "admin" and sum(u.get("role") == "admin" for u in rows) <= 1:
+            raise HTTPException(400, "At least one administrator account must remain")
+        save_users([u for u in rows if u.get("username") != username])
     for token, owner in list(TOKENS.items()):
         if owner == username:
             TOKENS.pop(token, None)
@@ -295,12 +353,13 @@ def delete_user(username: str, current: dict[str, str] = Depends(admin_auth)):
 def reset_user_password(username: str, body: PasswordReset, current: dict[str, str] = Depends(admin_auth)):
     if len(body.password) < 8:
         raise HTTPException(422, "Password must contain at least 8 characters")
-    rows = load_users()
-    target = next((u for u in rows if u["username"] == username.lower()), None)
-    if target is None:
-        raise HTTPException(404, "Account not found")
-    target["passwordHash"] = _password_hash(body.password)
-    save_users(rows)
+    with STATE_LOCK:
+        rows = load_users()
+        target = next((u for u in rows if u.get("username") == username.lower()), None)
+        if target is None:
+            raise HTTPException(404, "Account not found")
+        target["passwordHash"] = _password_hash(body.password)
+        save_users(rows)
     for token, owner in list(TOKENS.items()):
         if owner == target["username"]:
             TOKENS.pop(token, None)
@@ -334,15 +393,16 @@ def storage_status():
 
 @app.post("/api/records", dependencies=[Depends(auth)])
 def save_record(body: Record):
-    rows = read_records()
-    row = body.model_dump()
-    row["id"] = body.id or secrets.token_hex(8)
-    old = next((i for i, x in enumerate(rows) if x["id"] == row["id"]), None)
-    if old is None:
-        rows.insert(0, row)
-    else:
-        rows[old] = row
-    write_records(rows)
+    with STATE_LOCK:
+        rows = read_records()
+        row = body.model_dump()
+        row["id"] = body.id or secrets.token_hex(8)
+        old = next((i for i, x in enumerate(rows) if x.get("id") == row["id"]), None)
+        if old is None:
+            rows.insert(0, row)
+        else:
+            rows[old] = row
+        write_records(rows)
     return row
 
 
@@ -350,32 +410,34 @@ def save_record(body: Record):
 def save_records_bulk(records: list[Record]):
     if len(records) > 5000:
         raise HTTPException(413, "Too many records in one save")
-    rows = read_records()
-    known_cases = {row.get("caseId") for row in rows if row.get("caseId")}
-    saved, skipped = [], 0
-    for item in records:
-        row = item.model_dump()
-        if row.get("caseId") and row["caseId"] in known_cases:
-            skipped += 1
-            continue
-        row["id"] = row.get("id") or secrets.token_hex(8)
-        rows.insert(0, row)
-        if row.get("caseId"):
-            known_cases.add(row["caseId"])
-        saved.append(row)
-    if saved:
-        write_records(rows)
+    with STATE_LOCK:
+        rows = read_records()
+        known_cases = {row.get("caseId") for row in rows if row.get("caseId")}
+        saved, skipped = [], 0
+        for item in records:
+            row = item.model_dump()
+            if row.get("caseId") and row["caseId"] in known_cases:
+                skipped += 1
+                continue
+            row["id"] = row.get("id") or secrets.token_hex(8)
+            rows.insert(0, row)
+            if row.get("caseId"):
+                known_cases.add(row["caseId"])
+            saved.append(row)
+        if saved:
+            write_records(rows)
     return {"saved": len(saved), "skipped": skipped, "records": saved, "storage": "postgresql" if _database_url() else "json"}
 
 
 @app.post("/api/records/bulk-delete", dependencies=[Depends(auth)])
 def delete_records_bulk(body: DeleteRecordsRequest):
     selected = set(body.ids)
-    rows = read_records()
-    kept = [row for row in rows if str(row.get("id")) not in selected]
-    deleted = len(rows) - len(kept)
-    if deleted:
-        write_records(kept)
+    with STATE_LOCK:
+        rows = read_records()
+        kept = [row for row in rows if str(row.get("id")) not in selected]
+        deleted = len(rows) - len(kept)
+        if deleted:
+            write_records(kept)
     return {"deleted": deleted}
 
 
@@ -540,11 +602,12 @@ async def import_cases(file: UploadFile = File(...)):
 
 @app.delete("/api/records/{record_id}", dependencies=[Depends(auth)])
 def delete_record(record_id: str):
-    rows = read_records()
-    kept = [row for row in rows if row.get("id") != record_id]
-    if len(kept) == len(rows):
-        raise HTTPException(404, "Record not found")
-    write_records(kept)
+    with STATE_LOCK:
+        rows = read_records()
+        kept = [row for row in rows if row.get("id") != record_id]
+        if len(kept) == len(rows):
+            raise HTTPException(404, "Record not found")
+        write_records(kept)
     return {"ok": True}
 
 
