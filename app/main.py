@@ -118,18 +118,28 @@ def _pg_set(key: str, value: Any):
 
 
 def load_users() -> list[dict[str, str]]:
+    initial = {"username": ADMIN_USERNAME, "role": "admin", "passwordHash": _password_hash(ADMIN_PASSWORD)}
     if _database_url():
         users = _pg_get("users")
-        if users is not None:
+        if users is None:
+            users = [initial]
+            _pg_set("users", users)
             return users
-        initial = [{"username": ADMIN_USERNAME, "role": "admin", "passwordHash": _password_hash(ADMIN_PASSWORD)}]
-        _pg_set("users", initial)
-        return initial
+        # Keep the configured admin login available after a Render restart or
+        # an existing database created with an older ADMIN_USERNAME value.
+        if not any(user.get("username") == ADMIN_USERNAME for user in users):
+            users.append(initial)
+            _pg_set("users", users)
+        return users
     if USERS_DB.exists():
-        return json.loads(USERS_DB.read_text())
-    initial = [{"username": ADMIN_USERNAME, "role": "admin", "passwordHash": _password_hash(ADMIN_PASSWORD)}]
-    USERS_DB.write_text(json.dumps(initial, indent=2))
-    return initial
+        users = json.loads(USERS_DB.read_text())
+        if not any(user.get("username") == ADMIN_USERNAME for user in users):
+            users.append(initial)
+            USERS_DB.write_text(json.dumps(users, ensure_ascii=False, indent=2))
+        return users
+    users = [initial]
+    USERS_DB.write_text(json.dumps(users, ensure_ascii=False, indent=2))
+    return users
 
 
 def save_users(users: list[dict[str, str]]):
