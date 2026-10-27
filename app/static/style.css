@@ -126,3 +126,16 @@ body:has(#login:not([hidden])){background:radial-gradient(ellipse at 15% 16%,#f8
 .records-pagination button:disabled{opacity:.45;cursor:default}
 #pageInfo{min-width:120px;text-align:center}
 @media(max-width:650px){.records-pagination{justify-content:flex-start;flex-wrap:wrap}}
+
+/* Compact record identity block: keep the patient column narrow and IDs readable. */
+#records .records-table .patient-col{width:12%}
+#records .records-table .chart-col{width:9%}
+#records .records-table .date-col{width:10%}
+#records .records-table .physician-col{width:9%}
+#records .records-table .diagnosis-col{width:50%}
+#records .records-table .actions-col{width:6.5%}
+#records .records-table td:nth-child(2) .patient-name{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#records .records-table td:nth-child(2) .record-id{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;overflow-wrap:normal}
+#records .records-table td:nth-child(2) .case-id-line,#records .records-table td:nth-child(2) .record-id-line{margin-top:2px}
+.records-pagination label{display:none}
+.records-pagination select{min-width:48px;font-size:11px}
