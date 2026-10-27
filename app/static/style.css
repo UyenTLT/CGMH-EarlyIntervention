@@ -106,3 +106,16 @@ body:has(#login:not([hidden])){background:radial-gradient(ellipse at 15% 16%,#f8
 .overview-grid .recent-panel .table-wrap th:nth-child(4),.overview-grid .recent-panel .table-wrap td:nth-child(4){width:43%;white-space:normal}
 .overview-grid .recent-panel .table-wrap th:nth-child(5),.overview-grid .recent-panel .table-wrap td:nth-child(5){width:8%}
 .overview-grid .recent-panel .table-wrap td:nth-child(1) b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Explicit colgroup sizing prevents the browser from expanding Patient/Case ID. */
+#records .records-table{table-layout:fixed;width:100%;min-width:1080px}
+#records .records-table .select-col{width:3.5%}
+#records .records-table .patient-col{width:15%}
+#records .records-table .chart-col{width:10%}
+#records .records-table .date-col{width:11%}
+#records .records-table .physician-col{width:10%}
+#records .records-table .diagnosis-col{width:44%}
+#records .records-table .actions-col{width:6.5%}
+#records .records-table td:nth-child(2),#records .records-table th:nth-child(2){width:auto;min-width:0;max-width:none}
+#records .records-table td:nth-child(6),#records .records-table th:nth-child(6){width:auto;min-width:0;max-width:none}
+#records .records-table td:nth-child(2) b{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+#records .records-table td:nth-child(6){overflow-wrap:anywhere}
