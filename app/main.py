@@ -579,12 +579,39 @@ async def extract(file: UploadFile = File(...)):
     return {"filename": file.filename, "text": clipped, "fields": extract_basic_fields(clipped)}
 
 
+def diagnosis_group_codes(record: dict[str, Any]) -> list[str]:
+    """Return checklist diagnosis group codes in the checklist's defined order."""
+    codes = set()
+    for value in record.get("diagnoses", []) or []:
+        match = re.match(r"diag-(\d+)-", str(value))
+        if match and match.group(1) in DIAGNOSIS_GROUPS:
+            codes.add(match.group(1))
+    return sorted(codes, key=lambda code: (int(code), code))
+
+
+def primary_diagnosis_group(record: dict[str, Any]) -> str:
+    codes = diagnosis_group_codes(record)
+    if not codes:
+        return "Unclassified"
+    return "; ".join(f"{code} — {DIAGNOSIS_GROUPS[code]}" for code in codes)
+
+
+def record_sort_key(record: dict[str, Any]):
+    codes = diagnosis_group_codes(record)
+    rank = int(codes[0]) if codes else 1000
+    return (rank, str(record.get("patientName", "")).casefold(), str(record.get("caseId", "")).casefold(), str(record.get("examDate", "")))
+
+
+def ordered_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=record_sort_key)
+
+
 def selected_records(ids: list[str]) -> list[dict[str, Any]]:
     rows = read_records()
-    if not ids:
-        return rows
-    selected = set(ids)
-    return [row for row in rows if str(row.get("id")) in selected]
+    if ids:
+        selected = set(ids)
+        rows = [row for row in rows if str(row.get("id")) in selected]
+    return ordered_records(rows)
 
 
 def record_export_rows(rows: list[dict[str, Any]]) -> list[list[str]]:
@@ -605,7 +632,7 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[])):
             document.add_heading(record.get("patientName") or "Unnamed patient", level=1)
             table = document.add_table(rows=0, cols=2)
             table.style = "Light Shading Accent 1"
-            fields = [("Record ID", record.get("id", "")), ("Case ID", record.get("caseId", "")), ("Chart No", record.get("chartNo", "")), ("Exam Date", record.get("examDate", "")), ("Physician", record.get("physician", "")), ("Functional classifications", "; ".join(record.get("functional", []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []))), ("Medication / notes", record.get("medication", ""))]
+            fields = [("Record ID", record.get("id", "")), ("Case ID", record.get("caseId", "")), ("Chart No", record.get("chartNo", "")), ("Exam Date", record.get("examDate", "")), ("Physician", record.get("physician", "")), ("Primary diagnosis group", primary_diagnosis_group(record)), ("Functional classifications", "; ".join(record.get("functional", []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []))), ("Medication / notes", record.get("medication", ""))]
             for label, value in fields:
                 cells = table.add_row().cells
                 cells[0].text, cells[1].text = label, str(value)
@@ -633,7 +660,7 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[])):
         story = [Paragraph("Hospital Rehabilitation Checklist Records", styles["Title"]), Spacer(1, 12)]
         for record in rows:
             story.append(Paragraph(str(record.get("patientName") or "Unnamed patient"), styles["Heading2"]))
-            data = [["Field", "Value"]] + [[label, str(value or "")] for label, value in [("Record ID", record.get("id")), ("Case ID", record.get("caseId")), ("Chart No", record.get("chartNo")), ("Exam Date", record.get("examDate")), ("Physician", record.get("physician")), ("Functional classifications", "; ".join(record.get("functional", []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []))), ("Medication / notes", record.get("medication"))]]
+            data = [["Field", "Value"]] + [[label, str(value or "")] for label, value in [("Record ID", record.get("id")), ("Case ID", record.get("caseId")), ("Chart No", record.get("chartNo")), ("Exam Date", record.get("examDate")), ("Physician", record.get("physician")), ("Primary diagnosis group", primary_diagnosis_group(record)), ("Functional classifications", "; ".join(record.get("functional", []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []))), ("Medication / notes", record.get("medication"))]]
             table = Table([[Paragraph(escape(str(cell)), styles["BodyText"]) for cell in row] for row in data], colWidths=[1.8*inch, 8.0*inch], repeatRows=1)
             table.setStyle(TableStyle([("BACKGROUND", (0,0),(-1,0), colors.HexColor("#bd7137")), ("TEXTCOLOR", (0,0),(-1,0), colors.white), ("GRID", (0,0),(-1,-1), .4, colors.HexColor("#dedede")), ("VALIGN", (0,0),(-1,-1), "TOP"), ("PADDING", (0,0),(-1,-1), 6)]))
             story.extend([table, Spacer(1, 12)])
@@ -644,20 +671,20 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[])):
     wb = Workbook()
     ws = wb.active
     ws.title = "Checklist records"
-    headers = ["Record ID", "Case ID", "Patient Name", "Chart No", "Exam Date", "Physician", "Functional Classifications", "Diagnostic Items", "Treatment Plan", "Medication"]
+    headers = ["Record ID", "Case ID", "Patient Name", "Chart No", "Exam Date", "Physician", "Primary Diagnosis Group", "Functional Classifications", "Diagnostic Items", "Treatment Plan", "Medication"]
     headers.extend(f"Diagnosis {code} — {name}" for code, name in DIAGNOSIS_GROUPS.items())
     ws.append(headers)
     for r in rows:
         diagnoses = r.get("diagnoses", [])
         diagnosis_items = r.get("diagnosisLabels", []) + ([r["diagnosisNotes"]] if r.get("diagnosisNotes") else [])
         flags = [int(any(item.startswith(f"diag-{group_id}-") for item in diagnoses)) for group_id in DIAGNOSIS_GROUPS]
-        ws.append([r.get("id"), r.get("caseId"), r.get("patientName"), r.get("chartNo"), r.get("examDate"), r.get("physician"), "; ".join(r.get("functional", [])), "; ".join(diagnosis_items or diagnoses), "; ".join(r.get("management", [])), r.get("medication", ""), *flags])
+        ws.append([r.get("id"), r.get("caseId"), r.get("patientName"), r.get("chartNo"), r.get("examDate"), r.get("physician"), primary_diagnosis_group(r), "; ".join(r.get("functional", [])), "; ".join(diagnosis_items or diagnoses), "; ".join(r.get("management", [])), r.get("medication", ""), *flags])
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="BD7137")
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
-    widths = [18, 18, 24, 18, 16, 22, 40, 55, 38, 30] + [24] * len(DIAGNOSIS_GROUPS)
+    widths = [18, 18, 24, 18, 16, 22, 30, 40, 55, 38, 30] + [24] * len(DIAGNOSIS_GROUPS)
     for index, width in enumerate(widths, start=1):
         ws.column_dimensions[ws.cell(1, index).column_letter].width = width
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
