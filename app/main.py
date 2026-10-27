@@ -75,6 +75,7 @@ class Record(BaseModel):
     management: list[str] = Field(default_factory=list)
     medication: str = ""
     sourceText: str = ""
+    importedAt: str = ""
 
 
 def _password_hash(password: str, salt: bytes | None = None) -> str:
@@ -399,6 +400,10 @@ def save_record(body: Record):
         row["id"] = body.id or secrets.token_hex(8)
         old = next((i for i, x in enumerate(rows) if x.get("id") == row["id"]), None)
         if old is None:
+            row["importedAt"] = row.get("importedAt") or datetime.now().isoformat(timespec="seconds")
+        else:
+            row["importedAt"] = row.get("importedAt") or rows[old].get("importedAt", "")
+        if old is None:
             rows.insert(0, row)
         else:
             rows[old] = row
@@ -420,6 +425,7 @@ def save_records_bulk(records: list[Record]):
                 skipped += 1
                 continue
             row["id"] = row.get("id") or secrets.token_hex(8)
+            row["importedAt"] = row.get("importedAt") or datetime.now().isoformat(timespec="seconds")
             rows.insert(0, row)
             if row.get("caseId"):
                 known_cases.add(row["caseId"])
@@ -588,6 +594,7 @@ async def import_cases(file: UploadFile = File(...)):
                     "diagnosisLabels": labels, "classificationReview": result.get("review", []),
                     "classificationStatus": "suggested" if codes else "review", "diagnosisNotes": diagnosis, "management": [],
                     "medication": "", "sourceText": source_text,
+                    "importedAt": datetime.now().isoformat(timespec="seconds"),
                 }
                 known_case_ids.add(case_id)
                 created.append(record)

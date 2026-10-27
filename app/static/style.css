@@ -156,3 +156,10 @@ body:has(#login:not([hidden])){background:radial-gradient(ellipse at 15% 16%,#f8
 .records-save-button{padding:8px 12px;font-size:10px;white-space:nowrap}
 @media(max-width:700px){.records-save-button{order:-1}}
 .save-import-button{background:#9b5b2d;border-color:#9b5b2d}
+
+/* Records filters and explicit page counter. */
+.import-date-filter{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;white-space:nowrap}
+.import-date-filter span{font-weight:650;letter-spacing:.02em}
+.import-date-filter input{height:34px;border:1px solid #dfe8e7;background:#fff;color:var(--ink);padding:0 8px;font:inherit}
+#pageInfo{font-variant-numeric:tabular-nums;white-space:nowrap}
+@media(max-width:700px){.import-date-filter{width:100%;justify-content:space-between}.import-date-filter input{flex:1}}
