@@ -147,3 +147,7 @@ body:has(#login:not([hidden])){background:radial-gradient(ellipse at 15% 16%,#f8
 /* Override the legacy fixed table widths so the compact identity column takes effect. */
 #records .table-wrap th:nth-child(2),#records .table-wrap td:nth-child(2){width:135px;min-width:135px;max-width:135px}
 #records .table-wrap th:nth-child(6),#records .table-wrap td:nth-child(6){width:560px;min-width:560px;max-width:none}
+
+.saved-record-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;padding:9px 12px;border:1px solid #e7c79f;border-left:3px solid #bd7137;background:#fff8ef;color:#7d542f;font-size:10px}
+.saved-record-bar .quiet{padding:7px 10px;font-size:10px;white-space:nowrap}
+@media(max-width:560px){.saved-record-bar{align-items:flex-start;flex-direction:column}.saved-record-bar .quiet{width:100%}}
