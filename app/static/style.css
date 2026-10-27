@@ -79,3 +79,10 @@ body:has(#login:not([hidden])){background:radial-gradient(ellipse at 15% 16%,#f8
 .delete-selected:hover:not(:disabled){border-color:#d6948f;color:#8f302b;background:#fff0ee}
 .delete-selected:disabled{opacity:.45;cursor:default}
 @media(max-width:650px){.export-controls .delete-selected{order:2}.export-controls #export{order:4}}
+/* Records table: keep patient identity compact and give diagnosis the reading space. */
+#recordRows th:nth-child(2),#recordRows td:nth-child(2){width:15%;min-width:135px;max-width:190px;white-space:normal;overflow-wrap:anywhere}
+#recordRows th:nth-child(6),#recordRows td:nth-child(6){width:44%;min-width:330px;max-width:560px;white-space:normal;overflow-wrap:anywhere;vertical-align:top}
+#recordRows td:nth-child(2) b{display:block;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#recordRows td:nth-child(2) .record-id{max-width:175px;overflow-wrap:anywhere}
+#recordRows td:nth-child(6) .tag{white-space:normal;line-height:1.35}
+@media(max-width:700px){#recordRows th:nth-child(2),#recordRows td:nth-child(2){min-width:115px;width:22%}#recordRows th:nth-child(6),#recordRows td:nth-child(6){min-width:280px;width:50%}}
