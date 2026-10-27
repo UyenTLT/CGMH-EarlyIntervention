@@ -302,6 +302,14 @@ def records():
     return read_records()
 
 
+@app.get("/api/storage-status", dependencies=[Depends(auth)])
+def storage_status():
+    """Expose where this deployment persists data so admins can verify it."""
+    if _database_url():
+        return {"backend": "postgresql", "location": "DATABASE_URL / app_state", "records": len(read_records()), "users": len(load_users())}
+    return {"backend": "json", "location": str(DATA), "records": len(read_records()), "users": len(load_users())}
+
+
 @app.post("/api/records", dependencies=[Depends(auth)])
 def save_record(body: Record):
     rows = read_records()
@@ -335,7 +343,7 @@ def save_records_bulk(records: list[Record]):
         saved.append(row)
     if saved:
         write_records(rows)
-    return {"saved": len(saved), "skipped": skipped, "records": saved}
+    return {"saved": len(saved), "skipped": skipped, "records": saved, "storage": "postgresql" if _database_url() else "json"}
 
 
 @app.post("/api/records/bulk-delete", dependencies=[Depends(auth)])

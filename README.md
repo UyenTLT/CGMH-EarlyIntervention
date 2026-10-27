@@ -39,6 +39,7 @@ When `DATABASE_URL` is set (the Render deployment), the app stores both accounts
 | POST | `/api/users/{username}/reset-password` | Administrator-only password reset (minimum 8 characters) |
 | POST | `/api/classify` | Signed-in users: suggest diagnosis checklist items from text; uncertain/negated mentions are returned separately |
 | GET | `/api/records` | List records |
+| GET | `/api/storage-status` | Show whether the signed-in deployment uses PostgreSQL or local JSON and current counts |
 | POST | `/api/records` | Create/update a reviewed record |
 | POST | `/api/records/bulk-delete` | Delete selected records in one request |
 | POST | `/api/import-cases` | Import `.xlsx`, `.csv`, and `.txt` case data; tabular files need a `CASE ID` header, and labeled TXT blocks can use `Case ID:` / `Diagnosis:`; each case is a separate preview record, and repeat imports skip known case IDs |
