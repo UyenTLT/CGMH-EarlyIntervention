@@ -97,3 +97,12 @@ body:has(#login:not([hidden])){background:radial-gradient(ellipse at 15% 16%,#f8
 #records .table-wrap th:nth-child(7),#records .table-wrap td:nth-child(7){width:115px}
 #records .table-wrap td:nth-child(2) b{max-width:125px}
 #records .table-wrap td:nth-child(6){font-size:11px}
+/* Keep the overview's recent-record table aligned with the full Records view. */
+#recentRows{white-space:normal}
+.overview-grid .recent-panel .table-wrap table{table-layout:fixed;min-width:700px}
+.overview-grid .recent-panel .table-wrap th:nth-child(1),.overview-grid .recent-panel .table-wrap td:nth-child(1){width:18%;max-width:150px}
+.overview-grid .recent-panel .table-wrap th:nth-child(2),.overview-grid .recent-panel .table-wrap td:nth-child(2){width:15%}
+.overview-grid .recent-panel .table-wrap th:nth-child(3),.overview-grid .recent-panel .table-wrap td:nth-child(3){width:16%}
+.overview-grid .recent-panel .table-wrap th:nth-child(4),.overview-grid .recent-panel .table-wrap td:nth-child(4){width:43%;white-space:normal}
+.overview-grid .recent-panel .table-wrap th:nth-child(5),.overview-grid .recent-panel .table-wrap td:nth-child(5){width:8%}
+.overview-grid .recent-panel .table-wrap td:nth-child(1) b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
