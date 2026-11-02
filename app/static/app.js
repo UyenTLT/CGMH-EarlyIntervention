@@ -204,3 +204,7 @@ Object.assign(tr.en,{browseImport:'Import',format:'Output',export:'Download'});O
 Object.assign(tr.en,{overview:'Overview & new record',overviewHelp:'View activity and complete a checklist below. Use Records for case queries, import, and output.'});
 Object.assign(tr['zh-TW'],{overview:'總覽與新增紀錄',overviewHelp:'查看評估摘要並在下方填寫檢核表。個案查詢、匯入及輸出請至「紀錄」。'});
 translate();
+
+Object.assign(tr.en,{savedRecords:'Case library',recordsHelp:'Find cases, select records, then download your file.',findCases:'Find Case IDs',filters:'Filters',moreActions:'More',search:'e.g. CASE-001, CASE-002',searchHelp:'Use a partial ID to search, or separate multiple exact IDs with commas.',selectExportHint:'No cases selected',selectedCount:'{n} cases selected',clearSelection:'Clear',selectMatches:'Select results'});
+Object.assign(tr['zh-TW'],{savedRecords:'個案紀錄',recordsHelp:'搜尋個案、選取紀錄，再下載檔案。',findCases:'搜尋個案編號',filters:'篩選',moreActions:'更多',search:'例如 CASE-001, CASE-002',searchHelp:'可輸入部分編號搜尋；多筆完整編號請以逗號分隔。',selectExportHint:'尚未選取個案',selectedCount:'已選取 {n} 筆個案',clearSelection:'清除',selectMatches:'選取結果'});
+translate();

@@ -100,6 +100,9 @@ Case ID is required in the editor and is the only field used for record search. 
 
 ## Unified Records workspace
 
-Overview & new record opens after login and shows the activity summary and inline checklist editor together. Records remains a separate page for querying, selecting, importing, and downloading cases. The New record shortcut and Edit actions in Records navigate to the inline editor in Overview. There is no separate New record tab or editor dialog. Switching pages preserves the current browser-session draft.
+Overview & new record opens after login and shows the activity summary and inline checklist editor together. Records remains a separate page for querying, selecting, importing, and downloading cases. New record stays in Overview; Edit in Records navigates to that inline editor. There is no separate New record tab or editor dialog. Switching pages preserves the current browser-session draft.
 
 Search one Case ID by partial match, or paste comma/semicolon/newline-separated IDs for exact multi-ID matching. **Select results** adds all matching saved cases across pages; preview imports cannot be selected. Individual checkboxes, removable Case ID chips, and **Clear selection** control the output set. Download only sends explicitly selected record IDs. Available formats are XLSX, CSV (UTF-8 BOM, spreadsheet formula escaping), UTF-8 TXT, DOCX, and PDF. The authenticated API also retains its existing empty-IDs behavior for compatibility; the UI never downloads an empty selection.
+
+
+The Records layout uses a compact heading with one Import button, a full-width Case ID query row, and a separate selection/download row above the table. Import date is inside Filters; Delete selected is inside More. Native file-input chrome is visually hidden while the labelled upload remains keyboard accessible. Static builds add content hashes to asset URLs, and the Python-hosted HTML/CSS/JS routes require cache revalidation so styles and markup stay in sync after updates.

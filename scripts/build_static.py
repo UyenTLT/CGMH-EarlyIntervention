@@ -1,4 +1,6 @@
 """Build a CDN-hosted frontend without copying application data or credentials."""
+import hashlib
+import re
 import json
 import os
 from pathlib import Path
@@ -17,4 +19,11 @@ output.mkdir(exist_ok=True)
 for name in ('index.html', 'app.js', 'style.css', 'diagnosis-data.js'):
     shutil.copy2(root / 'app/static' / name, output / name)
 (output / 'config.js').write_text('window.CHECKLIST_CONFIG = ' + json.dumps({'apiBase': api_base}) + ';\n')
+# Every build ties HTML to the exact assets, preventing mixed old/new layouts.
+html = (output / 'index.html').read_text()
+for name in ('app.js', 'style.css', 'diagnosis-data.js', 'config.js'):
+    revision = hashlib.sha256((output / name).read_bytes()).hexdigest()[:12]
+    pattern = r'((?:src|href)="\./' + re.escape(name) + r')(?:\?[^"]*)?(")'
+    html = re.sub(pattern, lambda match: match.group(1) + '?v=' + revision + match.group(2), html)
+(output / 'index.html').write_text(html)
 print('Static frontend built in dist/')

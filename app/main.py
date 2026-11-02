@@ -259,22 +259,22 @@ def extract_basic_fields(text: str) -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return FileResponse(ROOT / "static" / "index.html")
+    return FileResponse(ROOT / "static" / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/style.css")
 def stylesheet():
-    return FileResponse(ROOT / "static" / "style.css", media_type="text/css")
+    return FileResponse(ROOT / "static" / "style.css", media_type="text/css", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/app.js")
 def frontend_script():
-    return FileResponse(ROOT / "static" / "app.js", media_type="text/javascript")
+    return FileResponse(ROOT / "static" / "app.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/diagnosis-data.js")
 def diagnosis_data_script():
-    return FileResponse(ROOT / "static" / "diagnosis-data.js", media_type="text/javascript")
+    return FileResponse(ROOT / "static" / "diagnosis-data.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @app.post("/api/login")

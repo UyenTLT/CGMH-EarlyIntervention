@@ -116,6 +116,8 @@ with tempfile.TemporaryDirectory() as temp:
             for width in [1280, 1440, 1920]:
                 page.set_viewport_size({'width': width, 'height': 1000})
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                assert page.locator('#caseWorkbook').evaluate('(el)=>el.getBoundingClientRect().width') <= 1
+                assert page.locator('#export').evaluate('(el)=>el.getBoundingClientRect().height') <= 45
             assert page.locator('[data-tab=entry]').count()==0
             page.locator('#clearSelection').click()
             assert page.locator('#export').is_disabled()
@@ -150,8 +152,14 @@ with tempfile.TemporaryDirectory() as temp:
                 (artifact_dir / 'rehab-bilingual-sample.xlsx').write_bytes(path.read_bytes())
                 page.set_viewport_size({'width': 1440, 'height': 1000})
                 page.screenshot(path=str(artifact_dir / 'rehab-desktop-v2.png'), full_page=True)
+                page.screenshot(path=str(artifact_dir / 'records-ui-zh.png'), full_page=True)
             page.locator('#lang').click()
             assert page.locator('#export').inner_text().strip().endswith('Download')
+            if os.environ.get('ARTIFACT_DIR'):
+                page.screenshot(path=str(artifact_dir / 'records-ui-en.png'), full_page=True)
+            page.locator('.records-filter summary').click()
+            assert page.locator('#importDate').is_visible()
+            page.locator('.records-filter summary').click()
             page.reload()
             page.locator('#dashboard').wait_for(state='visible')
             page.locator('[data-tab=records]').click()
