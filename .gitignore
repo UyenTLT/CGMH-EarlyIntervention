@@ -3,3 +3,5 @@ __pycache__/
 *.py[cod]
 app/data/records.json
 app/data/users.json
+
+dist/

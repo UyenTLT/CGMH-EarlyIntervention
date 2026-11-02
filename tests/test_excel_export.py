@@ -49,6 +49,33 @@ class ChecklistWorkbookTests(unittest.TestCase):
                     self.assertNotEqual(cell.data_type, 'f')
         self.assertEqual(wb['Case overview']['B2'].value, '=1+1')
 
+    def test_traditional_chinese_export_preserves_free_text(self):
+        record = dict(self.record(), diagnosisNotes='自由備註 / Clinical note')
+        stream = io.BytesIO()
+        build_checklist_workbook([record], 'zh-TW').save(stream)
+        stream.seek(0)
+        wb = load_workbook(stream)
+        self.assertEqual(wb['Case overview']['A1'].value, 'CASE ID')
+        self.assertIn('病患姓名', wb['Case overview']['B1'].value)
+        self.assertIn('Patient Name', wb['Case overview']['B1'].value)
+        self.assertIn('腦部', wb['Case overview']['F2'].value)
+        self.assertIn('語言：表達', wb['Checklist details']['B7'].value)
+        self.assertIn('腦性麻痺', wb['Checklist details']['B8'].value)
+        self.assertEqual(wb['Checklist details']['B9'].value, '自由備註 / Clinical note')
+        self.assertGreaterEqual(wb['Checklist details'].row_dimensions[7].height, 52)
+        self.assertTrue(wb['Diagnosis matrix'].conditional_formatting)
+
+    def test_long_notes_continue_without_losing_text(self):
+        note = '第一行 clinical note\n' * 100
+        record = dict(self.record(), diagnosisNotes=note)
+        wb = self.roundtrip([record])
+        details = wb['Checklist details']
+        pieces = [details.cell(row, 2).value or '' for row in range(1, details.max_row + 1)
+                  if str(details.cell(row, 1).value or '').startswith('Diagnosis notes')]
+        self.assertGreater(len(pieces), 1)
+        self.assertEqual(''.join(pieces), note)
+        self.assertTrue(all((dim.height or 0) <= 400 for dim in details.row_dimensions.values()))
+
     def test_empty_export_is_a_valid_workbook(self):
         wb = self.roundtrip([])
         self.assertEqual(wb['Case overview'].max_row, 1)

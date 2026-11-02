@@ -65,3 +65,29 @@ Run workbook regression checks with the app dependencies installed:
 ```sh
 HOSPITAL_DATA_DIR=/tmp/cgmh-export-tests .venv/bin/python -m unittest discover -s tests -v
 ```
+
+## Fast-opening frontend (Render Static Site)
+
+The Python service can sleep on a free plan. Serving its own HTML cannot remove the hosting provider's cold-start page on a first visit. The static frontend declared in `render.yaml` serves the login UI independently; only API operations may wait for the Python service. The page starts one health request when opened, supports language switching immediately, distinguishes connection failures from invalid credentials, and keeps form contents on failure. It does not run a keep-alive polling job.
+
+For an existing Render Blueprint, sync this revision to create the additional **Static Site** `chang-gung-rehab-checklist-web`. Do not recreate or delete the existing backend/database. If the existing service was created manually, create a Static Site from the same repository with:
+
+- Build command: `python3 scripts/build_static.py`
+- Publish directory: `dist`
+- Environment variable `API_BASE_URL`: the existing Python service's HTTPS origin, currently `https://chang-gung-rehab-checklist-demo.onrender.com`.
+- On the existing Python service, set `FRONTEND_ORIGINS` to the actual Static Site HTTPS origin (comma-separated exact origins for multiple sites), then deploy it. The blueprint includes the expected default static hostname; use Render's actual assigned hostname if it differs.
+
+Use the **Static Site's** published URL for the fast-opening UI. The old Python-service URL still has Render's cold-start behavior. No credentials are bundled into the static build. CORS permits only explicitly configured origins; authentication remains on the API. Login, saving, OCR, and exports still require a responsive API. This architecture does not provide offline record storage or guarantee a cold API will respond instantly.
+
+Local cross-origin check:
+
+```sh
+API_BASE_URL=http://127.0.0.1:8002 python3 scripts/build_static.py
+# Separate terminals, starting from the repository root:
+FRONTEND_ORIGINS=http://127.0.0.1:8010 uvicorn app.main:app --port 8002
+python3 -m http.server 8010 --directory dist
+```
+
+With Playwright and Chromium installed, `python tests/browser_smoke.py` builds the static UI, starts both servers with isolated test data, holds/aborts API requests to simulate a sleeping/offline backend, and tests cross-origin login, saved records, language switching, bilingual diagnosis search, Excel output, and desktop widths. It cleans up the servers and test data it creates.
+
+Excel follows the current UI language (`/api/export?format=xlsx&lang=en` or `lang=zh-TW`). Traditional Chinese output includes English field headings for cross-reference, translates known checklist items, and preserves free-text notes without machine translation. `app/export_labels.json` stores export translations corresponding to `app/static/diagnosis-data.js` and the functional/management catalog. Long notes continue across rows so they are not clipped by Excel's row-height limit. Diagnosis flags are highlighted in the separate analysis sheet.

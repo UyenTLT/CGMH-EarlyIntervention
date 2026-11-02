@@ -9,6 +9,8 @@ services:
     healthCheckPath: /
     autoDeploy: true
     envVars:
+      - key: FRONTEND_ORIGINS
+        value: https://chang-gung-rehab-checklist-web.onrender.com
       - key: PYTHON_VERSION
         value: 3.12.9
       - key: ADMIN_USERNAME
@@ -19,6 +21,27 @@ services:
         fromDatabase:
           name: cgmh-rehab-test-db
           property: connectionString
+
+  # Static assets are served independently of the sleeping Python web service.
+  - type: web
+    name: chang-gung-rehab-checklist-web
+    runtime: static
+    buildCommand: python3 scripts/build_static.py
+    staticPublishPath: ./dist
+    autoDeploy: true
+    envVars:
+      - key: API_BASE_URL
+        value: https://chang-gung-rehab-checklist-demo.onrender.com
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
 
 databases:
   - name: cgmh-rehab-test-db

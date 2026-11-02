@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import io, json, secrets, hashlib, hmac, re, os, csv, threading, time
+import io, json, secrets, hashlib, hmac, re, os, csv, threading, time, unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -9,10 +9,12 @@ from xml.sax.saxutils import escape
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
 from openpyxl.utils import get_column_letter
+from openpyxl.formatting.rule import CellIsRule
 from pydantic import BaseModel, Field
 from app.classifier import classify_text
 
@@ -31,6 +33,18 @@ DIAGNOSIS_GROUPS = {
     "13": "Vision", "14": "Auditory", "15": "Unspecified delay", "99": "Others",
 }
 app = FastAPI(title="Hospital Checklist Prototype")
+# An exact origin list supports a static CDN frontend; same-origin remains valid.
+frontend_origins = [origin.strip().rstrip('/') for origin in os.environ.get("FRONTEND_ORIGINS", "").split(",") if origin.strip()]
+if frontend_origins:
+    app.add_middleware(CORSMiddleware, allow_origins=frontend_origins,
+                       allow_methods=["GET", "POST", "DELETE"],
+                       allow_headers=["Authorization", "Content-Type"])
+
+
+@app.get("/config.js")
+def frontend_config():
+    return FileResponse(ROOT / "static" / "config.js", media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 TOKENS: dict[str, str] = {}
 STATE_LOCK = threading.RLock()
@@ -713,39 +727,52 @@ def record_export_rows(rows: list[dict[str, Any]]) -> list[list[str]]:
     return [header] + [[str(r.get("id", "")), str(r.get("patientName", "")), str(r.get("chartNo", "")), str(r.get("examDate", "")), str(r.get("physician", "")), "; ".join(r.get("functional", [])), "; ".join(r.get("diagnosisLabels", []) + ([r["diagnosisNotes"]] if r.get("diagnosisNotes") else [])), "; ".join(r.get("management", [])), str(r.get("medication", ""))] for r in rows]
 
 
-def build_checklist_workbook(rows: list[dict[str, Any]]) -> Workbook:
+EXPORT_LABELS = json.loads((ROOT / "export_labels.json").read_text(encoding="utf-8"))
+EXPORT_HEADINGS = {'CASE ID': '個案編號', 'Patient Name': '病患姓名', 'Chart No': '病歷號碼', 'Exam Date': '檢查日期', 'Physician': '醫師', 'Diagnosis Groups': '診斷分類', 'Checklist': '檢核表', 'REHABILITATION CHECKLIST': '小兒復健科檢核表', 'One section per evaluation · Matches the three sections of the hospital checklist': '每筆評估獨立呈現 · 依醫院檢核表三大部分編排', 'Record ID': '紀錄編號', 'Case ID': '個案編號', 'I. FUNCTIONAL CLASSIFICATION': '一、功能性診斷分類', 'II. DIAGNOSIS': '二、診斷分類', 'Diagnosis notes': '診斷補充說明', 'III. MANAGEMENT & INTERVENTIONS': '三、處置與介入', 'Medication / notes': '藥物／備註', 'View checklist →': '檢視檢核表 →', 'Back to case list ↑': '返回個案清單 ↑', 'No saved evaluations to export.': '沒有可匯出的已儲存評估紀錄。', 'Unnamed patient': '未填寫姓名'}
+
+
+def export_heading(value: str, lang: str) -> str:
+    if lang != "zh-TW":
+        return value
+    translated = EXPORT_HEADINGS.get(value)
+    return f"{translated}\n{value}" if translated else value
+
+
+def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Workbook:
     """Keep the daily case list compact and the clinical checklist readable."""
+    def heading(value: str) -> str:
+        return export_heading(value, lang)
     wb = Workbook()
     overview = wb.active
     overview.title = "Case overview"
-    overview.append(["CASE ID", "Patient Name", "Chart No", "Exam Date", "Physician", "Diagnosis Groups", "Checklist"])
+    overview.append(["CASE ID", *[heading(value) for value in ["Patient Name", "Chart No", "Exam Date", "Physician", "Diagnosis Groups", "Checklist"]]])
     details = wb.create_sheet("Checklist details")
-    details.append(["REHABILITATION CHECKLIST", "", "", ""])
+    details.append([heading("REHABILITATION CHECKLIST"), "", "", ""])
     details.merge_cells("A1:D1")
-    details.append(["One section per evaluation · Matches the three sections of the hospital checklist", "", "", ""])
+    details.append([heading("One section per evaluation · Matches the three sections of the hospital checklist"), "", "", ""])
     details.merge_cells("A2:D2")
     details.append(["", "", "", ""])
     matrix = wb.create_sheet("Diagnosis matrix")
-    matrix.append(["CASE ID", "Patient Name", "Record ID", *[f"{code} — {name}" for code, name in DIAGNOSIS_GROUPS.items()]])
+    matrix.append(["CASE ID", heading("Patient Name"), heading("Record ID"), *[f"{code} — {EXPORT_LABELS['groups'][code]}\n{name}" if lang == "zh-TW" else f"{code} — {name}" for code, name in DIAGNOSIS_GROUPS.items()]])
 
     def text(value: Any) -> str:
         return str(value or "")
 
     def listed(values: list[str]) -> str:
-        return "\n".join(str(value) for value in values or [])
+        return "\n".join(EXPORT_LABELS["values"].get(str(value), str(value)) if lang == "zh-TW" else EXPORT_LABELS["english"].get(str(value), str(value)) for value in values or [])
 
     for index, record in enumerate(rows, start=1):
         start = details.max_row + 1
         case_id = text(record.get("caseId"))
         patient = text(record.get("patientName"))
-        overview.append([case_id, patient, text(record.get("chartNo")), text(record.get("examDate")), text(record.get("physician")), primary_diagnosis_group(record), "View checklist →"])
+        overview.append([case_id, patient, text(record.get("chartNo")), text(record.get("examDate")), text(record.get("physician")), ("; ".join(f"{code} — {EXPORT_LABELS['groups'][code]}" for code in diagnosis_group_codes(record)) or "未分類") if lang == "zh-TW" else primary_diagnosis_group(record), heading("View checklist →")])
         link = overview.cell(index + 1, 7)
         link.hyperlink = f"#'Checklist details'!A{start}"
         link.font = Font(name="Calibri", color="167568", underline="single")
-        details.append([f"{index:02d} · {patient or case_id or 'Unnamed patient'}", "", "", ""])
+        details.append([f"{index:02d} · {patient or case_id or heading('Unnamed patient')}", "", "", ""])
         details.merge_cells(start_row=start, start_column=1, end_row=start, end_column=4)
-        details.append(["Case ID", case_id, "Chart No", text(record.get("chartNo"))])
-        details.append(["Exam Date", text(record.get("examDate")), "Physician", text(record.get("physician"))])
+        details.append([heading("Case ID"), case_id, heading("Chart No"), text(record.get("chartNo"))])
+        details.append([heading("Exam Date"), text(record.get("examDate")), heading("Physician"), text(record.get("physician"))])
         diagnosis_items = record.get("diagnosisLabels") or record.get("diagnoses", [])
         sections = [
             ("I. FUNCTIONAL CLASSIFICATION", listed(record.get("functional", []))),
@@ -756,15 +783,36 @@ def build_checklist_workbook(rows: list[dict[str, Any]]) -> Workbook:
             ("Record ID", text(record.get("id"))),
         ]
         for label, value in sections:
-            details.append([label, value, "", ""])
-            line = details.max_row
-            details.merge_cells(start_row=line, start_column=2, end_row=line, end_column=4)
-            details.cell(line, 1).font = Font(name="Calibri", bold=True, color="38594E", size=11)
-            details.cell(line, 1).fill = PatternFill("solid", fgColor="EFF6F2")
-            # Wrapped text remains visible instead of spilling across adjacent cases.
-            lines = sum(max(1, (len(part) + 75) // 76) for part in (value or "—").split("\n"))
-            details.row_dimensions[line].height = min(400, max(32, lines * 16 + 12))
-        details.append(["Back to case list ↑", "", "", ""])
+            # Merged Excel cells do not auto-fit row heights. Continue long notes
+            # across rows instead of silently clipping them at Excel's height limit.
+            chunks = []
+            begin, width, lines = 0, 0, 1
+            for position, char in enumerate(value):
+                if char == "\n":
+                    lines += 1
+                    width = 0
+                else:
+                    width += 2 if unicodedata.east_asian_width(char) in "WF" else 1
+                    if width > 76:
+                        lines += 1
+                        width = 2 if unicodedata.east_asian_width(char) in "WF" else 1
+                if lines >= 18:
+                    chunks.append(value[begin:position + 1])
+                    begin, width, lines = position + 1, 0, 1
+            if begin < len(value) or not chunks:
+                chunks.append(value[begin:])
+            for part, chunk in enumerate(chunks):
+                caption = heading(label)
+                if part:
+                    caption += "\n（續）" if lang == "zh-TW" else " (continued)"
+                details.append([caption, chunk, "", ""])
+                line = details.max_row
+                details.merge_cells(start_row=line, start_column=2, end_row=line, end_column=4)
+                details.cell(line, 1).font = Font(name="Calibri", bold=True, color="38594E", size=11)
+                details.cell(line, 1).fill = PatternFill("solid", fgColor="EFF6F2")
+                visual_lines = sum(max(1, (sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in segment) + 75) // 76) for segment in (chunk or "—").split("\n"))
+                details.row_dimensions[line].height = min(400, max(52 if lang == "zh-TW" else 32, visual_lines * 16 + 12))
+        details.append([heading("Back to case list ↑"), "", "", ""])
         details.cell(details.max_row, 1).hyperlink = f"#'Case overview'!A{index + 1}"
         details.cell(details.max_row, 1).font = Font(name="Calibri", color="167568", underline="single")
         details.append(["", "", "", ""])
@@ -773,10 +821,13 @@ def build_checklist_workbook(rows: list[dict[str, Any]]) -> Workbook:
         for cell in details[start]:
             cell.fill = PatternFill("solid", fgColor="167568")
             cell.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
-        details.row_dimensions[start].height = 32
+        details.row_dimensions[start].height = 36
+        details.row_dimensions[start + 1].height = 40 if lang == "zh-TW" else 30
+        details.row_dimensions[start + 2].height = 40 if lang == "zh-TW" else 30
 
+    details.row_dimensions[2].height = 42 if lang == "zh-TW" else 30
     if not rows:
-        details.append(["No saved evaluations to export."])
+        details.append([heading("No saved evaluations to export.")])
 
     for ws, widths in [(overview, [20, 26, 18, 16, 22, 44, 22]), (details, [34, 36, 20, 32]), (matrix, [20, 26, 24] + [22] * len(DIAGNOSIS_GROUPS))]:
         ws.sheet_view.showGridLines = False
@@ -814,11 +865,13 @@ def build_checklist_workbook(rows: list[dict[str, Any]]) -> Workbook:
                 ws.add_table(table)
             for row in ws.iter_rows(min_row=2):
                 ws.row_dimensions[row[0].row].height = max(36, min(160, 16 * max((len(str(cell.value or "")) // widths[cell.column-1] + 1) for cell in row) + 12))
+    if rows:
+        matrix.conditional_formatting.add(f"D2:S{matrix.max_row}", CellIsRule(operator="equal", formula=["1"], fill=PatternFill("solid", fgColor="DDEFE2"), font=Font(color="145B3C", bold=True)))
     return wb
 
 
 @app.get("/api/export", dependencies=[Depends(auth)])
-def export(format: str = "xlsx", ids: list[str] = Query(default=[])):
+def export(format: str = "xlsx", ids: list[str] = Query(default=[]), lang: str = Query(default="en", pattern="^(en|zh-TW)$")):
     rows = selected_records(ids)
     if ids and not rows:
         raise HTTPException(404, "No matching records selected")
@@ -866,6 +919,6 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[])):
         return StreamingResponse(buf, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="hospital_checklist.pdf"'})
     if format != "xlsx":
         raise HTTPException(422, "Format must be xlsx, docx, or pdf")
-    wb = build_checklist_workbook(rows)
+    wb = build_checklist_workbook(rows, lang)
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="hospital_checklist.xlsx"'})
