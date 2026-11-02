@@ -80,14 +80,25 @@ with tempfile.TemporaryDirectory() as temp:
             assert page.locator('#diagnoses input:checked').count() == 1
             page.locator('#recordForm button.primary').click()
             page.locator('#records').wait_for(state='visible')
-            page.get_by_text('STATIC-001', exact=True).wait_for()
+            page.locator('#recordRows').get_by_text('STATIC-001', exact=True).wait_for()
             assert '已選取 1 筆' in page.locator('#selectionStatus').inner_text()
             # Legacy data must not be displayed or searched, and editing must preserve it.
             auth = {'Authorization': 'Bearer ' + page.evaluate('sessionStorage.token')}
             legacy = page.request.post(API + '/api/records', headers=auth, data={'caseId':'LEGACY-002', 'patientName':'REMOVED-NAME', 'chartNo':'REMOVED-CHART', 'examDate':'2099-12-31', 'physician':'REMOVED-DOCTOR'}).json()
             page.reload();page.locator('#dashboard').wait_for(state='visible');page.locator('[data-tab=records]').click()
-            page.get_by_text('LEGACY-002', exact=True).wait_for()
+            page.locator('#recordRows').get_by_text('LEGACY-002', exact=True).wait_for()
             assert 'REMOVED-NAME' not in page.locator('#recordRows').inner_text()
+            page.locator('[data-tab=overview]').click()
+            page.locator('#overviewCaseRows').get_by_text('LEGACY-002', exact=True).wait_for()
+            dashboard_text=page.locator('#overview').inner_text()
+            for removed in ['REMOVED-NAME','REMOVED-CHART','2099-12-31','REMOVED-DOCTOR','Patient name','Chart number','Examination date']:
+                assert removed not in dashboard_text
+            assert page.locator('#overviewCaseRows tr').count()==2
+            page.locator('#lang').click()
+            assert page.locator('#overview').get_by_role('columnheader',name='Case ID',exact=True).count()==1
+            page.locator('#lang').click()
+            page.locator('[data-tab=records]').click()
+
             page.locator('#search').fill('REMOVED-NAME')
             assert page.locator('#recordRows tr').count() == 0
             page.locator('#search').fill('LEGACY-002')
@@ -121,7 +132,7 @@ with tempfile.TemporaryDirectory() as temp:
             page.reload()
             page.locator('#dashboard').wait_for(state='visible')
             page.locator('[data-tab=records]').click()
-            page.get_by_text('STATIC-001', exact=True).wait_for()
+            page.locator('#recordRows').get_by_text('STATIC-001', exact=True).wait_for()
             assert not errors, errors
             browser.close()
         print('PASS: static UI while API is pending/offline; login language; retry; duplicate-submit protection; cross-origin login/CRUD; bilingual search and XLSX; desktop widths; reload persistence')
