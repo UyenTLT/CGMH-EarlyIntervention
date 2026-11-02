@@ -5,7 +5,7 @@ An English / Traditional Chinese prototype for reviewing pediatric rehabilitatio
 ## Run
 
 ```sh
-cd hospital-app
+cd /workspace/CGMH-EarlyIntervention
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -49,6 +49,19 @@ When `DATABASE_URL` is set (the Render deployment), the app stores both accounts
 
 ## Scope and clinical use
 
-This is a local demonstration, not a production hospital system. The sample credentials, in-memory sessions, browser-session draft storage, local JSON storage, and basic upload pipeline are not suitable for real patient information. Passwords are stored as salted PBKDF2 hashes; session tokens are kept in process memory. Before deployment, require hospital security review, secure identity integration, role-based access, audit logging, encrypted storage and transport, retention controls, malware scanning, CSRF protections, and validated backup/recovery. Extraction recognizes labeled basic fields only; clinicians must verify extracted values. OCR runs only when Tesseract is installed; recognized language packs `eng` and `chi_tra` are needed for English and Traditional Chinese. Scanned PDF OCR additionally requires Poppler. The supplied diagnosis workbook informs keyword terminology and examples; export currently uses a default layout containing multi-select text fields plus one 0/1 flag for each diagnostic group.
+This is a local demonstration, not a production hospital system. The sample credentials, in-memory sessions, browser-session draft storage, local JSON storage, and basic upload pipeline are not suitable for real patient information. Passwords are stored as salted PBKDF2 hashes; session tokens are kept in process memory. Before deployment, require hospital security review, secure identity integration, role-based access, audit logging, encrypted storage and transport, retention controls, malware scanning, CSRF protections, and validated backup/recovery. Extraction recognizes labeled basic fields only; clinicians must verify extracted values. OCR runs only when Tesseract is installed; recognized language packs `eng` and `chi_tra` are needed for English and Traditional Chinese. Scanned PDF OCR additionally requires Poppler. The supplied diagnosis workbook informs keyword terminology and examples; Excel export uses a compact Case overview sheet, a linked Checklist details sheet organized into the form’s three sections, and a separate Diagnosis matrix sheet with 0/1 flags for analysis.
 
 Diagnosis suggestions use conservative keyword patterns informed by the supplied checklist and sample workbook. They are not trained clinical AI and do not determine diagnoses. Uncertain, suspected, borderline, and locally negated matches are shown separately and left unchecked. The feature covers the checklist's diagnosis section; functional classifications and treatment plans remain manual. Every suggested item needs clinician review before saving.
+
+## Workspace and Excel export
+
+- **Overview** shows activity counts. **New record** is the single checklist editor, with one sticky Save action. Diagnosis groups expand individually and can be searched; selections stay checked while searching.
+- **Records** owns case-list import (XLSX/CSV/TXT), import preview/save, search, date filtering, selection, deletion, and export. The editor’s upload extracts a single source document. Imported cases remain previews until explicitly saved.
+- Export uses selected saved records, or all saved records when none are selected. Search and date filters do not restrict an unselected export. On phones, records display as cards.
+- Excel’s **Case overview** has seven columns, filters, frozen identity columns, and links to each checklist. **Checklist details** separates functional classifications, diagnoses/notes, and management/medication. **Diagnosis matrix** retains all 16 diagnostic group flags and internal record IDs for analysis. All user-entered cell values are stored as text, not Excel formulas.
+
+Run workbook regression checks with the app dependencies installed:
+
+```sh
+HOSPITAL_DATA_DIR=/tmp/cgmh-export-tests .venv/bin/python -m unittest discover -s tests -v
+```

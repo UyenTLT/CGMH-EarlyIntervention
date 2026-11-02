@@ -10,7 +10,9 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Upload
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
+from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field
 from app.classifier import classify_text
 
@@ -711,6 +713,110 @@ def record_export_rows(rows: list[dict[str, Any]]) -> list[list[str]]:
     return [header] + [[str(r.get("id", "")), str(r.get("patientName", "")), str(r.get("chartNo", "")), str(r.get("examDate", "")), str(r.get("physician", "")), "; ".join(r.get("functional", [])), "; ".join(r.get("diagnosisLabels", []) + ([r["diagnosisNotes"]] if r.get("diagnosisNotes") else [])), "; ".join(r.get("management", [])), str(r.get("medication", ""))] for r in rows]
 
 
+def build_checklist_workbook(rows: list[dict[str, Any]]) -> Workbook:
+    """Keep the daily case list compact and the clinical checklist readable."""
+    wb = Workbook()
+    overview = wb.active
+    overview.title = "Case overview"
+    overview.append(["CASE ID", "Patient Name", "Chart No", "Exam Date", "Physician", "Diagnosis Groups", "Checklist"])
+    details = wb.create_sheet("Checklist details")
+    details.append(["REHABILITATION CHECKLIST", "", "", ""])
+    details.merge_cells("A1:D1")
+    details.append(["One section per evaluation · Matches the three sections of the hospital checklist", "", "", ""])
+    details.merge_cells("A2:D2")
+    details.append(["", "", "", ""])
+    matrix = wb.create_sheet("Diagnosis matrix")
+    matrix.append(["CASE ID", "Patient Name", "Record ID", *[f"{code} — {name}" for code, name in DIAGNOSIS_GROUPS.items()]])
+
+    def text(value: Any) -> str:
+        return str(value or "")
+
+    def listed(values: list[str]) -> str:
+        return "\n".join(str(value) for value in values or [])
+
+    for index, record in enumerate(rows, start=1):
+        start = details.max_row + 1
+        case_id = text(record.get("caseId"))
+        patient = text(record.get("patientName"))
+        overview.append([case_id, patient, text(record.get("chartNo")), text(record.get("examDate")), text(record.get("physician")), primary_diagnosis_group(record), "View checklist →"])
+        link = overview.cell(index + 1, 7)
+        link.hyperlink = f"#'Checklist details'!A{start}"
+        link.font = Font(name="Calibri", color="167568", underline="single")
+        details.append([f"{index:02d} · {patient or case_id or 'Unnamed patient'}", "", "", ""])
+        details.merge_cells(start_row=start, start_column=1, end_row=start, end_column=4)
+        details.append(["Case ID", case_id, "Chart No", text(record.get("chartNo"))])
+        details.append(["Exam Date", text(record.get("examDate")), "Physician", text(record.get("physician"))])
+        diagnosis_items = record.get("diagnosisLabels") or record.get("diagnoses", [])
+        sections = [
+            ("I. FUNCTIONAL CLASSIFICATION", listed(record.get("functional", []))),
+            ("II. DIAGNOSIS", listed(diagnosis_items)),
+            ("Diagnosis notes", text(record.get("diagnosisNotes"))),
+            ("III. MANAGEMENT & INTERVENTIONS", listed(record.get("management", []))),
+            ("Medication / notes", text(record.get("medication"))),
+            ("Record ID", text(record.get("id"))),
+        ]
+        for label, value in sections:
+            details.append([label, value, "", ""])
+            line = details.max_row
+            details.merge_cells(start_row=line, start_column=2, end_row=line, end_column=4)
+            details.cell(line, 1).font = Font(name="Calibri", bold=True, color="38594E", size=11)
+            details.cell(line, 1).fill = PatternFill("solid", fgColor="EFF6F2")
+            # Wrapped text remains visible instead of spilling across adjacent cases.
+            lines = sum(max(1, (len(part) + 75) // 76) for part in (value or "—").split("\n"))
+            details.row_dimensions[line].height = min(400, max(32, lines * 16 + 12))
+        details.append(["Back to case list ↑", "", "", ""])
+        details.cell(details.max_row, 1).hyperlink = f"#'Case overview'!A{index + 1}"
+        details.cell(details.max_row, 1).font = Font(name="Calibri", color="167568", underline="single")
+        details.append(["", "", "", ""])
+        selected_groups = set(diagnosis_group_codes(record))
+        matrix.append([case_id, patient, text(record.get("id")), *[int(code in selected_groups) for code in DIAGNOSIS_GROUPS]])
+        for cell in details[start]:
+            cell.fill = PatternFill("solid", fgColor="167568")
+            cell.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
+        details.row_dimensions[start].height = 32
+
+    if not rows:
+        details.append(["No saved evaluations to export."])
+
+    for ws, widths in [(overview, [20, 26, 18, 16, 22, 44, 22]), (details, [34, 36, 20, 32]), (matrix, [20, 26, 24] + [22] * len(DIAGNOSIS_GROUPS))]:
+        ws.sheet_view.showGridLines = False
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.sheet_properties.outlinePr.summaryRight = False
+        ws.freeze_panes = "C2" if ws != details else "B4"
+        ws.print_options.horizontalCentered = True
+        ws.page_setup.orientation = "landscape" if ws != details else "portrait"
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        ws.print_title_rows = "1:1" if ws != details else "1:2"
+        ws.print_area = ws.dimensions
+        ws.oddFooter.center.text = "Page &P of &N"
+        for col, width in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(col)].width = width
+        for row in ws:
+            for cell in row:
+                if not cell.has_style:
+                    cell.font = Font(name="Calibri", size=11, color="223B46")
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+                # Treat user-entered values as text, including strings starting with '='.
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
+        for cell in ws[1]:
+            cell.fill = PatternFill("solid", fgColor="167568")
+            cell.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+        ws.row_dimensions[1].height = 36 if ws != matrix else 58
+        if ws != details:
+            ws.auto_filter.ref = ws.dimensions
+            if rows:
+                table = ExcelTable(displayName="Cases" if ws == overview else "DiagnosisCodes", ref=ws.dimensions)
+                table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium4", showRowStripes=True)
+                ws.add_table(table)
+            for row in ws.iter_rows(min_row=2):
+                ws.row_dimensions[row[0].row].height = max(36, min(160, 16 * max((len(str(cell.value or "")) // widths[cell.column-1] + 1) for cell in row) + 12))
+    return wb
+
+
 @app.get("/api/export", dependencies=[Depends(auth)])
 def export(format: str = "xlsx", ids: list[str] = Query(default=[])):
     rows = selected_records(ids)
@@ -760,24 +866,6 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[])):
         return StreamingResponse(buf, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="hospital_checklist.pdf"'})
     if format != "xlsx":
         raise HTTPException(422, "Format must be xlsx, docx, or pdf")
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Checklist records"
-    headers = ["Record ID", "Case ID", "Patient Name", "Chart No", "Exam Date", "Physician", "Primary Diagnosis Group", "Functional Classifications", "Diagnostic Items", "Treatment Plan", "Medication"]
-    headers.extend(f"Diagnosis {code} — {name}" for code, name in DIAGNOSIS_GROUPS.items())
-    ws.append(headers)
-    for r in rows:
-        diagnoses = r.get("diagnoses", [])
-        diagnosis_items = r.get("diagnosisLabels", []) + ([r["diagnosisNotes"]] if r.get("diagnosisNotes") else [])
-        flags = [int(any(item.startswith(f"diag-{group_id}-") for item in diagnoses)) for group_id in DIAGNOSIS_GROUPS]
-        ws.append([r.get("id"), r.get("caseId"), r.get("patientName"), r.get("chartNo"), r.get("examDate"), r.get("physician"), primary_diagnosis_group(r), "; ".join(r.get("functional", [])), "; ".join(diagnosis_items or diagnoses), "; ".join(r.get("management", [])), r.get("medication", ""), *flags])
-    for cell in ws[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="BD7137")
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
-    widths = [18, 18, 24, 18, 16, 22, 30, 40, 55, 38, 30] + [24] * len(DIAGNOSIS_GROUPS)
-    for index, width in enumerate(widths, start=1):
-        ws.column_dimensions[ws.cell(1, index).column_letter].width = width
+    wb = build_checklist_workbook(rows)
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="hospital_checklist.xlsx"'})
