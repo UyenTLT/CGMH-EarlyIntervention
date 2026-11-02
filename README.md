@@ -55,7 +55,7 @@ Diagnosis suggestions use conservative keyword patterns informed by the supplied
 
 ## Workspace and Excel export
 
-- **Overview** shows activity counts. **New record** opens the checklist editor within Records. Diagnosis groups expand individually and can be searched; selections stay checked while searching.
+- **Overview** shows activity counts. **Overview & new record** contains the checklist editor below the activity summary. Diagnosis groups expand individually and can be searched; selections stay checked while searching.
 - **Records** owns case-list import (XLSX/CSV/TXT), import preview/save, search, date filtering, selection, deletion, and export. The editor’s upload extracts a single source document. Imported cases remain previews until explicitly saved.
 - The UI downloads only selected saved records; the download button is disabled until cases are selected. Selections persist across queries and pages. On phones, records display as cards.
 - Excel’s **Case overview** has three columns, filters, a frozen Case ID column, and links to each checklist. **Checklist details** separates functional classifications, diagnoses/notes, and management/medication. **Diagnosis matrix** retains all 16 diagnostic group flags and internal record IDs for analysis. All user-entered cell values are stored as text, not Excel formulas.
@@ -100,6 +100,6 @@ Case ID is required in the editor and is the only field used for record search. 
 
 ## Unified Records workspace
 
-Records opens after login. Import, output format, Download, and New record share one toolbar. New/edit opens a dialog in Records; there is no separate New record navigation tab. Close or Escape preserves the current browser-session draft.
+Overview & new record opens after login and shows the activity summary and inline checklist editor together. Records remains a separate page for querying, selecting, importing, and downloading cases. The New record shortcut and Edit actions in Records navigate to the inline editor in Overview. There is no separate New record tab or editor dialog. Switching pages preserves the current browser-session draft.
 
 Search one Case ID by partial match, or paste comma/semicolon/newline-separated IDs for exact multi-ID matching. **Select results** adds all matching saved cases across pages; preview imports cannot be selected. Individual checkboxes, removable Case ID chips, and **Clear selection** control the output set. Download only sends explicitly selected record IDs. Available formats are XLSX, CSV (UTF-8 BOM, spreadsheet formula escaping), UTF-8 TXT, DOCX, and PDF. The authenticated API also retains its existing empty-IDs behavior for compatibility; the UI never downloads an empty selection.

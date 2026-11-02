@@ -70,7 +70,8 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#connectionBanner').wait_for(state='hidden')
             page.locator('#loginForm button').click()
             page.locator('#dashboard').wait_for(state='visible')
-            page.locator('#newRecord').click()
+            assert page.locator('#overview #recordForm').is_visible()
+            assert page.locator('#editorDialog').count()==0
             assert page.locator('[name=patientName], [name=chartNo], [name=examDate], [name=physician]').count() == 0
             page.locator('[name=caseId]').fill('STATIC-001')
             # Search both English and Chinese regardless of interface language.
@@ -79,7 +80,7 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#diagnosisSearch').fill('腦性麻痺')
             assert page.locator('#diagnoses input:checked').count() == 1
             page.locator('#recordForm button.primary').click()
-            page.locator('#editorDialog').wait_for(state='hidden');page.locator('#records').wait_for(state='visible')
+            page.locator('#overview').wait_for(state='hidden');page.locator('#records').wait_for(state='visible')
             page.locator('#recordRows').get_by_text('STATIC-001', exact=True).wait_for()
             assert '已選取 1 筆' in page.locator('#selectionStatus').inner_text()
             # Legacy data must not be displayed or searched, and editing must preserve it.
@@ -103,7 +104,8 @@ with tempfile.TemporaryDirectory() as temp:
             assert page.locator('#recordRows tr').count() == 0
             page.locator('#search').fill('LEGACY-002')
             page.locator('#recordRows [data-edit]').click()
-            page.locator('#recordForm button.primary').click();page.locator('#editorDialog').wait_for(state='hidden');page.locator('#records').wait_for(state='visible')
+            assert page.locator('#overview').is_visible()
+            page.locator('#recordForm button.primary').click();page.locator('#overview').wait_for(state='hidden');page.locator('#records').wait_for(state='visible')
             stored = page.request.get(API + '/api/records', headers=auth).json()
             assert next(row for row in stored if row['id']==legacy['id'])['patientName']=='REMOVED-NAME'
             page.locator('#search').fill('STATIC-001')

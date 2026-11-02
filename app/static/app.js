@@ -56,22 +56,20 @@ function showDashboard(){
   $('#login').hidden=true;$('#dashboard').hidden=false;$('#localBanner').hidden=!localMode;$('#currentUser').textContent=currentUser.username;$('#accountTab').hidden=currentUser.role!=='admin';
   try{translate()}catch(error){console.error('UI translation failed',error)}
   try{restoreDraft()}catch(error){console.error('Draft restore failed',error)}
-  showTab('records');loadRecords();
+  showTab('overview');loadRecords();
   if(currentUser.role==='admin')loadUsers()
 }
 let cachedRecords=[],pendingImportedRecords=[];const selectedRecordIds=new Set();const allowedPageSizes=[10,15,20,25,30];let recordsPage=1,recordsPageSize=10;
 function showTab(id,keepCurrentEdit=false){
  if(id==='entry'){
   if($('#recordForm').dataset.id&&!keepCurrentEdit){sessionStorage.removeItem('checklistDraft');$('#recordForm').reset()}
-  showTab('records');$('#editorDialog').showModal();$('#recordForm [name=caseId]').focus();return;
+  showTab('overview');$('#entry').scrollIntoView({behavior:'smooth',block:'start'});$('#recordForm [name=caseId]').focus({preventScroll:true});return;
  }
- if($('#editorDialog').open)$('#editorDialog').close();
  document.querySelectorAll('.tab').forEach(b=>{b.classList.toggle('active',b.dataset.tab===id);b.setAttribute('aria-current',b.dataset.tab===id?'page':'false')});
  document.querySelectorAll('.tab-panel').forEach(p=>p.hidden=p.id!==id);
  window.scrollTo({top:0,behavior:'smooth'});if(id==='records')drawRows(cachedRecords);if(id==='accounts')loadUsers();
 }
 $('#newRecord').onclick=()=>showTab('entry');
-$('#closeEditor').onclick=()=>$('#editorDialog').close();
 
 function saveDraft(){const form=$('#recordForm'),fields={};for(const el of form.elements)if(el.name&&el.type!=='checkbox')fields[el.name]=el.value;const state={fields,sourceText:$('#sourceText').value,selected:Object.fromEntries(['functional','diagnoses','management'].map(k=>[k,[...$('#'+k).querySelectorAll('input:checked')].map(x=>x.value)]))};sessionStorage.setItem('checklistDraft',JSON.stringify(state));$('#saveStatus').textContent=t('draftSaved')}
 function restoreDraft(){try{const state=JSON.parse(sessionStorage.getItem('checklistDraft')||'null');if(!state)return;for(const [name,value] of Object.entries(state.fields||{})){const input=$(`#recordForm [name="${name}"]`);if(input)input.value=value}$('#sourceText').value=state.sourceText||'';for(const [key,values] of Object.entries(state.selected||{}))$('#'+key).querySelectorAll('input').forEach(x=>x.checked=values.includes(x.value));renderChecks()}catch{sessionStorage.removeItem('checklistDraft')}}
@@ -202,3 +200,7 @@ Object.assign(tr['zh-TW'],{closeEditor:'關閉編輯',selectMatches:'選取搜�
 translate();
 
 Object.assign(tr.en,{browseImport:'Import',format:'Output',export:'Download'});Object.assign(tr['zh-TW'],{browseImport:'匯入',format:'輸出格式',export:'下載'});translate();
+
+Object.assign(tr.en,{overview:'Overview & new record',overviewHelp:'View activity and complete a checklist below. Use Records for case queries, import, and output.'});
+Object.assign(tr['zh-TW'],{overview:'總覽與新增紀錄',overviewHelp:'查看評估摘要並在下方填寫檢核表。個案查詢、匯入及輸出請至「紀錄」。'});
+translate();
