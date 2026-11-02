@@ -55,9 +55,9 @@ Diagnosis suggestions use conservative keyword patterns informed by the supplied
 
 ## Workspace and Excel export
 
-- **Overview** shows activity counts. **New record** is the single checklist editor, with one sticky Save action. Diagnosis groups expand individually and can be searched; selections stay checked while searching.
+- **Overview** shows activity counts. **New record** opens the checklist editor within Records. Diagnosis groups expand individually and can be searched; selections stay checked while searching.
 - **Records** owns case-list import (XLSX/CSV/TXT), import preview/save, search, date filtering, selection, deletion, and export. The editor’s upload extracts a single source document. Imported cases remain previews until explicitly saved.
-- Export uses selected saved records, or all saved records when none are selected. Search and date filters do not restrict an unselected export. On phones, records display as cards.
+- The UI downloads only selected saved records; the download button is disabled until cases are selected. Selections persist across queries and pages. On phones, records display as cards.
 - Excel’s **Case overview** has three columns, filters, a frozen Case ID column, and links to each checklist. **Checklist details** separates functional classifications, diagnoses/notes, and management/medication. **Diagnosis matrix** retains all 16 diagnostic group flags and internal record IDs for analysis. All user-entered cell values are stored as text, not Excel formulas.
 
 Run workbook regression checks with the app dependencies installed:
@@ -96,3 +96,10 @@ Excel follows the current UI language (`/api/export?format=xlsx&lang=en` or `lan
 ## Case ID-only workflow
 
 Case ID is required in the editor and is the only field used for record search. Patient Name, Chart No, Exam Date, and Physician are omitted from the editor, record list, document-field extraction, and all XLSX/DOCX/PDF outputs. New case-list imports ignore these structured columns. Uploaded source text and free-text clinical notes are not automatically redacted. Existing stored fields remain intact when an older record is edited. Activity counts use the record creation/import timestamp rather than examination dates. Older records without a Case ID display a prompt to add one when editing.
+
+
+## Unified Records workspace
+
+Records opens after login. Import, output format, Download, and New record share one toolbar. New/edit opens a dialog in Records; there is no separate New record navigation tab. Close or Escape preserves the current browser-session draft.
+
+Search one Case ID by partial match, or paste comma/semicolon/newline-separated IDs for exact multi-ID matching. **Select results** adds all matching saved cases across pages; preview imports cannot be selected. Individual checkboxes, removable Case ID chips, and **Clear selection** control the output set. Download only sends explicitly selected record IDs. Available formats are XLSX, CSV (UTF-8 BOM, spreadsheet formula escaping), UTF-8 TXT, DOCX, and PDF. The authenticated API also retains its existing empty-IDs behavior for compatibility; the UI never downloads an empty selection.

@@ -1,3 +1,4 @@
+import csv
 import asyncio
 import io
 import unittest
@@ -35,6 +36,31 @@ class CaseIdentityTests(unittest.TestCase):
         for key in ['patientName', 'chartNo', 'examDate', 'physician']:
             self.assertNotIn(key, row)
         self.assertNotIn('REMOVED-', row['sourceText'])
+
+    def test_csv_and_txt_respect_multiple_selected_records(self):
+        records=[dict(self.legacy(),id='one',caseId='CASE-1',diagnosisNotes='中文, "note"'),dict(self.legacy(),id='two',caseId='CASE-2'),dict(self.legacy(),id='three',caseId='CASE-3')]
+        async def read_body(response):
+            return b''.join([chunk async for chunk in response.body_iterator])
+        for fmt in ['csv','txt']:
+            with self.subTest(format=fmt), patch.object(main,'read_records',return_value=records):
+                response=main.export(format=fmt,ids=['one','three'],lang='en')
+                content=asyncio.run(read_body(response)).decode('utf-8-sig')
+                self.assertIn('CASE-1',content)
+                self.assertIn('CASE-3',content)
+                self.assertNotIn('CASE-2',content)
+                self.assertNotIn('REMOVED-NAME',content)
+                if fmt=='csv':
+                    rows=list(csv.reader(io.StringIO(content)))
+                    self.assertEqual(rows[0][0],'CASE ID')
+                    self.assertEqual(rows[1][4],'中文, "note"')
+
+    def test_csv_escapes_spreadsheet_formulas(self):
+        async def read_body(response):
+            return b''.join([chunk async for chunk in response.body_iterator])
+        with patch.object(main,'read_records',return_value=[dict(self.legacy(),caseId='=1+1')]):
+            response=main.export(format='csv',ids=['legacy-1'],lang='en')
+            rows=list(csv.reader(io.StringIO(asyncio.run(read_body(response)).decode('utf-8-sig'))))
+        self.assertEqual(rows[1][0],"'=1+1")
 
     def test_word_and_pdf_only_use_case_identity(self):
         async def read_body(response):

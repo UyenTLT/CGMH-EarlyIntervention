@@ -695,7 +695,7 @@ def record_export_rows(rows: list[dict[str, Any]]) -> list[list[str]]:
 
 
 EXPORT_LABELS = json.loads((ROOT / "export_labels.json").read_text(encoding="utf-8"))
-EXPORT_HEADINGS = {'CASE ID': '個案編號', 'Patient Name': '病患姓名', 'Chart No': '病歷號碼', 'Exam Date': '檢查日期', 'Physician': '醫師', 'Diagnosis Groups': '診斷分類', 'Checklist': '檢核表', 'REHABILITATION CHECKLIST': '小兒復健科檢核表', 'One section per evaluation · Matches the three sections of the hospital checklist': '每筆評估獨立呈現 · 依醫院檢核表三大部分編排', 'Record ID': '紀錄編號', 'Case ID': '個案編號', 'I. FUNCTIONAL CLASSIFICATION': '一、功能性診斷分類', 'II. DIAGNOSIS': '二、診斷分類', 'Diagnosis notes': '診斷補充說明', 'III. MANAGEMENT & INTERVENTIONS': '三、處置與介入', 'Medication / notes': '藥物／備註', 'View checklist →': '檢視檢核表 →', 'Back to case list ↑': '返回個案清單 ↑', 'No saved evaluations to export.': '沒有可匯出的已儲存評估紀錄。', 'Unnamed patient': '未填寫姓名'}
+EXPORT_HEADINGS = {'CASE ID': '個案編號', 'Patient Name': '病患姓名', 'Chart No': '病歷號碼', 'Exam Date': '檢查日期', 'Physician': '醫師', 'Diagnosis Groups': '診斷分類', 'Checklist': '檢核表', 'REHABILITATION CHECKLIST': '小兒復健科檢核表', 'One section per evaluation · Matches the three sections of the hospital checklist': '每筆評估獨立呈現 · 依醫院檢核表三大部分編排', 'Record ID': '紀錄編號', 'Case ID': '個案編號', 'I. FUNCTIONAL CLASSIFICATION': '一、功能性診斷分類', 'II. DIAGNOSIS': '二、診斷分類', 'Diagnosis notes': '診斷補充說明', 'III. MANAGEMENT & INTERVENTIONS': '三、處置與介入', 'Medication / notes': '藥物／備註', 'View checklist →': '檢視檢核表 →', 'Back to case list ↑': '返回個案清單 ↑', 'Functional Classifications': '功能性診斷分類', 'Diagnostic Items': '診斷項目', 'Treatment Plan': '處置計畫', 'Medication': '藥物／備註', 'No saved evaluations to export.': '沒有可匯出的已儲存評估紀錄。', 'Unnamed patient': '未填寫姓名'}
 
 
 def export_heading(value: str, lang: str) -> str:
@@ -841,6 +841,28 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[]), lang: str =
     rows = selected_records(ids)
     if ids and not rows:
         raise HTTPException(404, "No matching records selected")
+    if format in {"csv", "txt"}:
+        def translated(values):
+            catalog = EXPORT_LABELS["values"] if lang == "zh-TW" else EXPORT_LABELS["english"]
+            return "\n".join(catalog.get(str(value), str(value)) for value in values or [])
+
+        fields = ["CASE ID", "Diagnosis Groups", "Functional Classifications", "Diagnostic Items", "Diagnosis notes", "Treatment Plan", "Medication"]
+        values = [[str(row.get("caseId") or ""), primary_diagnosis_group(row), translated(row.get("functional", [])), translated(row.get("diagnosisLabels") or row.get("diagnoses", [])), str(row.get("diagnosisNotes") or ""), translated(row.get("management", [])), str(row.get("medication") or "")] for row in rows]
+        if format == "csv":
+            def safe_cell(value):
+                # CSV spreadsheet programs interpret leading formula characters.
+                return "'" + value if value.lstrip().startswith(("=", "+", "-", "@")) or value.startswith(("\t", "\r")) else value
+            output = io.StringIO(newline="")
+            writer = csv.writer(output)
+            writer.writerow([field if field == "CASE ID" else export_heading(field, lang) for field in fields])
+            writer.writerows([[safe_cell(value) for value in row] for row in values])
+            raw = output.getvalue().encode("utf-8-sig")
+            media_type = "text/csv; charset=utf-8"
+        else:
+            blocks = ["\n".join(f"{export_heading(field, lang).replace(chr(10), ' / ')}: {value}" for field, value in zip(fields, row)) for row in values]
+            raw = ("\n\n".join(blocks) + ("\n" if blocks else "")).encode("utf-8")
+            media_type = "text/plain; charset=utf-8"
+        return StreamingResponse(io.BytesIO(raw), media_type=media_type, headers={"Content-Disposition": f'attachment; filename="hospital_checklist.{format}"'})
     if format == "docx":
         from docx import Document
         document = Document()
@@ -884,7 +906,7 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[]), lang: str =
         doc.build(story); buf.seek(0)
         return StreamingResponse(buf, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="hospital_checklist.pdf"'})
     if format != "xlsx":
-        raise HTTPException(422, "Format must be xlsx, docx, or pdf")
+        raise HTTPException(422, "Format must be xlsx, csv, txt, docx, or pdf")
     wb = build_checklist_workbook(rows, lang)
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="hospital_checklist.xlsx"'})
