@@ -41,6 +41,12 @@ with tempfile.TemporaryDirectory() as temp:
             browser = pw.chromium.launch(executable_path='/usr/bin/chromium', args=['--no-sandbox'])
             page = browser.new_page(viewport={'width': 1440, 'height': 1000})
             page.set_default_timeout(6000)
+            def filter_text(value):
+                if not page.locator('#caseIdPicker').evaluate('(el)=>el.open'):
+                    page.locator('#caseIdPicker summary').click()
+                page.locator('#search').fill(value)
+                page.locator('#applyCaseFilter').click()
+
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
             held = []
@@ -100,18 +106,18 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#lang').click()
             page.locator('[data-tab=records]').click()
 
-            page.locator('#search').fill('REMOVED-NAME')
+            filter_text('REMOVED-NAME')
             assert page.locator('#recordRows tr').count() == 0
-            page.locator('#search').fill('LEGACY-002')
+            filter_text('LEGACY-002')
             page.locator('#recordRows [data-edit]').click()
             assert page.locator('#overview').is_visible()
             page.locator('#recordForm button.primary').click();page.locator('#overview').wait_for(state='hidden');page.locator('#records').wait_for(state='visible')
             stored = page.request.get(API + '/api/records', headers=auth).json()
             assert next(row for row in stored if row['id']==legacy['id'])['patientName']=='REMOVED-NAME'
-            page.locator('#search').fill('STATIC-001')
+            filter_text('STATIC-001')
             page.locator('#recordRows .record-select').check()
             # Only the selected case is downloaded below.
-            page.locator('#search').fill('')
+            filter_text('')
             page.locator('#recordRows .record-select').evaluate_all('(boxes)=>boxes.forEach(box=>{if(box.checked && box.closest("tr").textContent.includes("LEGACY-002"))box.click()})')
             for width in [1280, 1440, 1920]:
                 page.set_viewport_size({'width': width, 'height': 1000})
@@ -119,13 +125,31 @@ with tempfile.TemporaryDirectory() as temp:
                 assert page.locator('#caseWorkbook').evaluate('(el)=>el.getBoundingClientRect().width') <= 1
                 assert page.locator('#export').evaluate('(el)=>el.getBoundingClientRect().height') <= 45
             assert page.locator('[data-tab=entry]').count()==0
+            filter_text('')
+            page.locator('#caseIdPicker summary').click()
+            page.locator('#casePickerOptions input[value="STATIC-001"]').check()
+            page.locator('#casePickerOptions input[value="LEGACY-002"]').check()
+            page.locator('#applyCaseFilter').click()
+            assert page.locator('#recordRows tr').count()==2
+            assert '2' in page.locator('#casePickerText').inner_text()
+            page.locator('#selectMatches').click()
+            assert page.locator('#selectedCases button').count()==2
+            page.locator('#caseIdPicker summary').click()
+            page.locator('#casePickerOptions input[value="LEGACY-002"]').uncheck()
+            page.locator('#applyCaseFilter').click()
+            assert page.locator('#recordRows tr').count()==1
+            assert page.locator('#selectedCases button').count()==2
+            page.locator('#caseIdPicker summary').click()
+            page.locator('#clearCaseFilter').click()
+            page.locator('#applyCaseFilter').click()
+            assert page.locator('#recordRows tr').count()==2
             page.locator('#clearSelection').click()
             assert page.locator('#export').is_disabled()
-            page.locator('#search').fill('STATIC-001, LEGACY-002')
+            filter_text('STATIC-001, LEGACY-002')
             assert page.locator('#recordRows tr').count()==2
             page.locator('#selectMatches').click()
             assert page.locator('#selectedCases button').count()==2
-            page.locator('#search').fill('STATIC-001')
+            filter_text('STATIC-001')
             assert page.locator('#selectedCases button').count()==2
             for fmt in ['csv','txt']:
                 page.locator('#exportFormat').select_option(fmt)
@@ -171,6 +195,21 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#pendingImportBar').wait_for(state='hidden')
             page.locator('#recordRows').get_by_text('cases-IMPORT-003',exact=True).wait_for()
             assert page.locator('#selectedCases button').count()==1
+            # Large libraries show 100 options at a time without requiring typing.
+            import json
+            library=[{'id':f'scale-{i}','caseId':f'SCALE-{i:04d}','diagnoses':[]} for i in range(2232)]
+            page.route(API+'/api/records',lambda route:route.fulfill(json=library))
+            page.reload();page.locator('#dashboard').wait_for(state='visible');page.locator('[data-tab=records]').click()
+            page.locator('#caseIdPicker summary').click()
+            page.locator('#casePickerOptions input').first.wait_for()
+            assert page.locator('#casePickerOptions input').count()==100
+            page.locator('#moreCaseOptions').click()
+            assert page.locator('#casePickerOptions input').count()==200
+            page.locator('#search').fill('SCALE-2231')
+            assert page.locator('#casePickerOptions input').count()==1
+            page.locator('#casePickerOptions input').check()
+            page.locator('#applyCaseFilter').click()
+            assert page.locator('#recordRows tr').count()==1
             assert not errors, errors
             browser.close()
         print('PASS: static UI while API is pending/offline; login language; retry; duplicate-submit protection; cross-origin login/CRUD; bilingual search and XLSX; desktop widths; reload persistence')

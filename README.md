@@ -106,3 +106,6 @@ Search one Case ID by partial match, or paste comma/semicolon/newline-separated 
 
 
 The Records layout uses a compact heading with one Import button, a full-width Case ID query row, and a separate selection/download row above the table. Import date is inside Filters; Delete selected is inside More. Native file-input chrome is visually hidden while the labelled upload remains keyboard accessible. Static builds add content hashes to asset URLs, and the Python-hosted HTML/CSS/JS routes require cache revalidation so styles and markup stay in sync after updates.
+
+
+Case ID filtering also offers a checkbox dropdown: choose one or multiple IDs without typing, or search inside the dropdown. Options are sorted naturally and displayed 100 at a time with Show more. Reset filter clears only the query/filter; output selections remain until explicitly removed. With checked IDs, the dropdown search narrows its options while the table shows the checked IDs. Select results adds filtered cases to the download selection.
