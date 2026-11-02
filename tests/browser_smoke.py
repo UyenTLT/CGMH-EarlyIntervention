@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#loginForm button').click()
             page.locator('#dashboard').wait_for(state='visible')
             page.locator('[data-tab=entry]').click()
-            page.locator('[name=patientName]').fill('測試個案 Synthetic')
+            assert page.locator('[name=patientName], [name=chartNo], [name=examDate], [name=physician]').count() == 0
             page.locator('[name=caseId]').fill('STATIC-001')
             # Search both English and Chinese regardless of interface language.
             page.locator('#diagnosisSearch').fill('spastic')
@@ -80,8 +80,26 @@ with tempfile.TemporaryDirectory() as temp:
             assert page.locator('#diagnoses input:checked').count() == 1
             page.locator('#recordForm button.primary').click()
             page.locator('#records').wait_for(state='visible')
-            page.get_by_text('測試個案 Synthetic', exact=True).wait_for()
+            page.get_by_text('STATIC-001', exact=True).wait_for()
             assert '已選取 1 筆' in page.locator('#selectionStatus').inner_text()
+            # Legacy data must not be displayed or searched, and editing must preserve it.
+            auth = {'Authorization': 'Bearer ' + page.evaluate('sessionStorage.token')}
+            legacy = page.request.post(API + '/api/records', headers=auth, data={'caseId':'LEGACY-002', 'patientName':'REMOVED-NAME', 'chartNo':'REMOVED-CHART', 'examDate':'2099-12-31', 'physician':'REMOVED-DOCTOR'}).json()
+            page.reload();page.locator('#dashboard').wait_for(state='visible');page.locator('[data-tab=records]').click()
+            page.get_by_text('LEGACY-002', exact=True).wait_for()
+            assert 'REMOVED-NAME' not in page.locator('#recordRows').inner_text()
+            page.locator('#search').fill('REMOVED-NAME')
+            assert page.locator('#recordRows tr').count() == 0
+            page.locator('#search').fill('LEGACY-002')
+            page.locator('#recordRows [data-edit]').click()
+            page.locator('#recordForm button.primary').click();page.locator('#records').wait_for(state='visible')
+            stored = page.request.get(API + '/api/records', headers=auth).json()
+            assert next(row for row in stored if row['id']==legacy['id'])['patientName']=='REMOVED-NAME'
+            page.locator('#search').fill('STATIC-001')
+            page.locator('#recordRows .record-select').check()
+            # Only the selected case is downloaded below.
+            page.locator('#search').fill('')
+            page.locator('#recordRows .record-select').evaluate_all('(boxes)=>boxes.forEach(box=>{if(box.checked && box.closest("tr").textContent.includes("LEGACY-002"))box.click()})')
             for width in [1280, 1440, 1920]:
                 page.set_viewport_size({'width': width, 'height': 1000})
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
@@ -90,8 +108,8 @@ with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'output.xlsx'
             download.value.save_as(path)
             wb = load_workbook(path)
-            assert wb['Case overview']['B1'].value == '病患姓名\nPatient Name'
-            assert '腦性麻痺' in wb['Checklist details']['B8'].value
+            assert wb['Case overview']['B1'].value == '診斷分類\nDiagnosis Groups'
+            assert '腦性麻痺' in wb['Checklist details']['B7'].value
             if os.environ.get('ARTIFACT_DIR'):
                 artifact_dir = Path(os.environ['ARTIFACT_DIR'])
                 artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -103,7 +121,7 @@ with tempfile.TemporaryDirectory() as temp:
             page.reload()
             page.locator('#dashboard').wait_for(state='visible')
             page.locator('[data-tab=records]').click()
-            page.get_by_text('測試個案 Synthetic', exact=True).wait_for()
+            page.get_by_text('STATIC-001', exact=True).wait_for()
             assert not errors, errors
             browser.close()
         print('PASS: static UI while API is pending/offline; login language; retry; duplicate-submit protection; cross-origin login/CRUD; bilingual search and XLSX; desktop widths; reload persistence')

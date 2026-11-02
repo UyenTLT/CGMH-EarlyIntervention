@@ -24,3 +24,6 @@ header{height:76px;background:#fff;border-bottom:1px solid var(--line);display:f
 @media(min-width:1600px){.container{max-width:1560px}.columns{grid-template-columns:320px minmax(0,1fr)}}
 .language-switch{position:absolute;top:17px;right:max(calc((100vw - 1360px)/2),24px);z-index:10}.login-card{margin-top:100px}header{padding-right:180px}.connection-banner{position:relative;margin:0;padding:14px 24px;display:flex;gap:18px;align-items:center;justify-content:center;background:#e9f5ef;color:#265e4c;font-size:14px;border-bottom:1px solid #cce2d6}.connection-banner .quiet{min-height:36px;padding:6px 12px;white-space:nowrap}.connection-banner:not([hidden])~main .language-switch{position:static}.export-controls select{max-width:180px}#loginError:empty{display:none}.login-card .eyebrow{margin-top:8px}.case-field{max-width:360px}
 @media(max-width:600px){.language-switch{right:16px;top:13px}.connection-banner{padding:12px 16px;padding-top:65px;align-items:flex-start;font-size:13px}.login-card{margin-top:90px}header{padding-right:130px}}
+/* Case ID is the only visible record identifier. */
+#records .records-table{min-width:620px}.patient-col{width:24%}.diagnosis-col{width:auto}.case-identity{overflow-wrap:anywhere}.actions-col{width:100px}
+@media(max-width:600px){#records .records-table{min-width:0}#recordRows td:nth-child(n+3){grid-column:1 / -1}}

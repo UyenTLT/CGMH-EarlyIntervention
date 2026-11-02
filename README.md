@@ -58,7 +58,7 @@ Diagnosis suggestions use conservative keyword patterns informed by the supplied
 - **Overview** shows activity counts. **New record** is the single checklist editor, with one sticky Save action. Diagnosis groups expand individually and can be searched; selections stay checked while searching.
 - **Records** owns case-list import (XLSX/CSV/TXT), import preview/save, search, date filtering, selection, deletion, and export. The editor’s upload extracts a single source document. Imported cases remain previews until explicitly saved.
 - Export uses selected saved records, or all saved records when none are selected. Search and date filters do not restrict an unselected export. On phones, records display as cards.
-- Excel’s **Case overview** has seven columns, filters, frozen identity columns, and links to each checklist. **Checklist details** separates functional classifications, diagnoses/notes, and management/medication. **Diagnosis matrix** retains all 16 diagnostic group flags and internal record IDs for analysis. All user-entered cell values are stored as text, not Excel formulas.
+- Excel’s **Case overview** has three columns, filters, a frozen Case ID column, and links to each checklist. **Checklist details** separates functional classifications, diagnoses/notes, and management/medication. **Diagnosis matrix** retains all 16 diagnostic group flags and internal record IDs for analysis. All user-entered cell values are stored as text, not Excel formulas.
 
 Run workbook regression checks with the app dependencies installed:
 
@@ -91,3 +91,8 @@ python3 -m http.server 8010 --directory dist
 With Playwright and Chromium installed, `python tests/browser_smoke.py` builds the static UI, starts both servers with isolated test data, holds/aborts API requests to simulate a sleeping/offline backend, and tests cross-origin login, saved records, language switching, bilingual diagnosis search, Excel output, and desktop widths. It cleans up the servers and test data it creates.
 
 Excel follows the current UI language (`/api/export?format=xlsx&lang=en` or `lang=zh-TW`). Traditional Chinese output includes English field headings for cross-reference, translates known checklist items, and preserves free-text notes without machine translation. `app/export_labels.json` stores export translations corresponding to `app/static/diagnosis-data.js` and the functional/management catalog. Long notes continue across rows so they are not clipped by Excel's row-height limit. Diagnosis flags are highlighted in the separate analysis sheet.
+
+
+## Case ID-only workflow
+
+Case ID is required in the editor and is the only field used for record search. Patient Name, Chart No, Exam Date, and Physician are omitted from the editor, record list, document-field extraction, and all XLSX/DOCX/PDF outputs. New case-list imports ignore these structured columns. Uploaded source text and free-text clinical notes are not automatically redacted. Existing stored fields remain intact when an older record is edited. Activity counts use the record creation/import timestamp rather than examination dates. Older records without a Case ID display a prompt to add one when editing.

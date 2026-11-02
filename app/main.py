@@ -252,29 +252,9 @@ def write_records(rows: list[dict[str, Any]]):
 
 def extract_basic_fields(text: str) -> dict[str, str]:
     """Conservative label-based extraction only; no clinical diagnosis inference."""
-    patterns = {
-        "patientName": r"(?:patient\s*name|姓名|病患姓名)\s*[:：=|]\s*([^\r\n|;,]+)",
-        "chartNo": r"(?:chart\s*(?:no\.?|number)|medical\s*record\s*(?:no\.?|number)|病歷號碼?|病歷編號)\s*[:：=|]\s*([^\r\n|;,]+)",
-        "examDate": r"(?:examination\s*date|exam\s*date|檢查日期|評估日期)\s*[:：=|]\s*([^\r\n|;,]+)",
-        "physician": r"(?:physician|doctor|醫師|醫師簽名)\s*[:：=|]\s*([^\r\n|;,]+)",
-    }
-    result: dict[str, str] = {}
-    for key, pattern in patterns.items():
-        match = re.search(pattern, text, re.IGNORECASE)
-        if not match:
-            continue
-        value = match.group(1).strip()
-        if key == "examDate":
-            normalized = re.search(r"\b(\d{4})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{1,2})\b", value)
-            if normalized:
-                try:
-                    value = datetime(int(normalized[1]), int(normalized[2]), int(normalized[3])).strftime("%Y-%m-%d")
-                except ValueError:
-                    continue
-            else:
-                continue
-        result[key] = value
-    return result
+    match = re.search(r"(?:case\s*(?:id|no\.?|number)|caseid|個案編號)\s*[:：=|]\s*([^\r\n|;,]+)", text, re.IGNORECASE)
+    return {"caseId": match.group(1).strip()} if match else {}
+
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -422,6 +402,9 @@ def save_record(body: Record):
         if old is None:
             rows.insert(0, row)
         else:
+            for key in ("patientName", "chartNo", "examDate", "physician"):
+                if key not in body.model_fields_set and key in rows[old]:
+                    row[key] = rows[old][key]
             rows[old] = row
         write_records(rows)
     return row
@@ -567,10 +550,6 @@ async def import_cases(file: UploadFile = File(...)):
         if columns["case"] is None:
             continue
         found_case_sheet = True
-        # Excel often represents a patient with several cases using vertically
-        # merged cells. openpyxl exposes only the first cell's value, so retain
-        # the patient identifiers for subsequent Case ID rows in that block.
-        carried = {"patient": "", "chart": ""}
         for values in iterator:
             raw_case = values[columns["case"]] if columns["case"] < len(values) else None
             if raw_case is None or not str(raw_case).strip() or str(raw_case).strip().casefold() == "case id":
@@ -579,23 +558,12 @@ async def import_cases(file: UploadFile = File(...)):
             # Some workbooks put several case identifiers in one cell.
             case_values = [part.strip() for part in re.split(r"[\r\n,，;；|]+", raw_case_value) if part.strip()]
             cell = lambda key: values[columns[key]] if columns[key] is not None and columns[key] < len(values) else None
-            for key in carried:
-                current = str(cell(key) or "").strip()
-                if current:
-                    carried[key] = current
-            patient = carried["patient"]
             diagnosis = str(cell("diagnosis") or "").strip()
-            chart = carried["chart"]
-            exam_date = cell("date")
-            if isinstance(exam_date, datetime):
-                exam_date = exam_date.strftime("%Y-%m-%d")
-            else:
-                exam_date = str(exam_date or "").strip()
-            physician = str(cell("physician") or "").strip()
             if not diagnosis:
                 excluded_cols = {columns[key] for key in ("case", "patient", "chart", "date", "physician") if columns[key] is not None}
                 diagnosis = "; ".join(f"{raw_headers[i]}: {value}" for i, value in enumerate(values) if i not in excluded_cols and i < len(raw_headers) and value is not None and str(value).strip())
-            source_text = " | ".join(f"{raw_headers[i]}: {value}" for i, value in enumerate(values) if i < len(raw_headers) and value is not None and str(value).strip())
+            excluded_cols = {columns[key] for key in ("patient", "chart", "date", "physician") if columns[key] is not None}
+            source_text = " | ".join(f"{raw_headers[i]}: {value}" for i, value in enumerate(values) if i not in excluded_cols and i < len(raw_headers) and value is not None and str(value).strip())
             result = classify_text(diagnosis) if diagnosis else {"suggestions": [], "review": []}
             codes = [suggestion["value"] for suggestion in result["suggestions"]]
             labels = [suggestion["label"] for suggestion in result["suggestions"]]
@@ -605,8 +573,7 @@ async def import_cases(file: UploadFile = File(...)):
                     skipped += 1
                     continue
                 record = {
-                    "id": secrets.token_hex(8), "caseId": case_id, "patientName": patient, "chartNo": chart,
-                    "examDate": exam_date, "physician": physician, "functional": [], "diagnoses": codes,
+                    "id": secrets.token_hex(8), "caseId": case_id, "functional": [], "diagnoses": codes,
                     "diagnosisLabels": labels, "classificationReview": result.get("review", []),
                     "classificationStatus": "suggested" if codes else "review", "diagnosisNotes": diagnosis, "management": [],
                     "medication": "", "sourceText": source_text,
@@ -707,7 +674,7 @@ def primary_diagnosis_group(record: dict[str, Any]) -> str:
 def record_sort_key(record: dict[str, Any]):
     codes = diagnosis_group_codes(record)
     rank = int(codes[0]) if codes else 1000
-    return (rank, str(record.get("patientName", "")).casefold(), str(record.get("caseId", "")).casefold(), str(record.get("examDate", "")))
+    return (rank, str(record.get("caseId", "")).casefold())
 
 
 def ordered_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -723,8 +690,8 @@ def selected_records(ids: list[str]) -> list[dict[str, Any]]:
 
 
 def record_export_rows(rows: list[dict[str, Any]]) -> list[list[str]]:
-    header = ["Record ID", "Patient Name", "Chart No", "Exam Date", "Physician", "Functional Classifications", "Diagnostic Items", "Treatment Plan", "Medication"]
-    return [header] + [[str(r.get("id", "")), str(r.get("patientName", "")), str(r.get("chartNo", "")), str(r.get("examDate", "")), str(r.get("physician", "")), "; ".join(r.get("functional", [])), "; ".join(r.get("diagnosisLabels", []) + ([r["diagnosisNotes"]] if r.get("diagnosisNotes") else [])), "; ".join(r.get("management", [])), str(r.get("medication", ""))] for r in rows]
+    header = ["Case ID", "Functional Classifications", "Diagnostic Items", "Treatment Plan", "Medication"]
+    return [header] + [[str(r.get("caseId", "")), "; ".join(r.get("functional", [])), "; ".join(r.get("diagnosisLabels", []) + ([r["diagnosisNotes"]] if r.get("diagnosisNotes") else [])), "; ".join(r.get("management", [])), str(r.get("medication", ""))] for r in rows]
 
 
 EXPORT_LABELS = json.loads((ROOT / "export_labels.json").read_text(encoding="utf-8"))
@@ -745,7 +712,7 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
     wb = Workbook()
     overview = wb.active
     overview.title = "Case overview"
-    overview.append(["CASE ID", *[heading(value) for value in ["Patient Name", "Chart No", "Exam Date", "Physician", "Diagnosis Groups", "Checklist"]]])
+    overview.append(["CASE ID", *[heading(value) for value in ["Diagnosis Groups", "Checklist"]]])
     details = wb.create_sheet("Checklist details")
     details.append([heading("REHABILITATION CHECKLIST"), "", "", ""])
     details.merge_cells("A1:D1")
@@ -753,7 +720,7 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
     details.merge_cells("A2:D2")
     details.append(["", "", "", ""])
     matrix = wb.create_sheet("Diagnosis matrix")
-    matrix.append(["CASE ID", heading("Patient Name"), heading("Record ID"), *[f"{code} — {EXPORT_LABELS['groups'][code]}\n{name}" if lang == "zh-TW" else f"{code} — {name}" for code, name in DIAGNOSIS_GROUPS.items()]])
+    matrix.append(["CASE ID", heading("Record ID"), *[f"{code} — {EXPORT_LABELS['groups'][code]}\n{name}" if lang == "zh-TW" else f"{code} — {name}" for code, name in DIAGNOSIS_GROUPS.items()]])
 
     def text(value: Any) -> str:
         return str(value or "")
@@ -764,15 +731,14 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
     for index, record in enumerate(rows, start=1):
         start = details.max_row + 1
         case_id = text(record.get("caseId"))
-        patient = text(record.get("patientName"))
-        overview.append([case_id, patient, text(record.get("chartNo")), text(record.get("examDate")), text(record.get("physician")), ("; ".join(f"{code} — {EXPORT_LABELS['groups'][code]}" for code in diagnosis_group_codes(record)) or "未分類") if lang == "zh-TW" else primary_diagnosis_group(record), heading("View checklist →")])
-        link = overview.cell(index + 1, 7)
+        overview.append([case_id, ("; ".join(f"{code} — {EXPORT_LABELS['groups'][code]}" for code in diagnosis_group_codes(record)) or "未分類") if lang == "zh-TW" else primary_diagnosis_group(record), heading("View checklist →")])
+        link = overview.cell(index + 1, 3)
         link.hyperlink = f"#'Checklist details'!A{start}"
         link.font = Font(name="Calibri", color="167568", underline="single")
-        details.append([f"{index:02d} · {patient or case_id or heading('Unnamed patient')}", "", "", ""])
+        details.append([f"{index:02d} · {case_id or 'Case ID missing'}", "", "", ""])
         details.merge_cells(start_row=start, start_column=1, end_row=start, end_column=4)
-        details.append([heading("Case ID"), case_id, heading("Chart No"), text(record.get("chartNo"))])
-        details.append([heading("Exam Date"), text(record.get("examDate")), heading("Physician"), text(record.get("physician"))])
+        details.append([heading("Case ID"), case_id, "", ""])
+        details.merge_cells(start_row=start + 1, start_column=2, end_row=start + 1, end_column=4)
         diagnosis_items = record.get("diagnosisLabels") or record.get("diagnoses", [])
         sections = [
             ("I. FUNCTIONAL CLASSIFICATION", listed(record.get("functional", []))),
@@ -817,7 +783,7 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
         details.cell(details.max_row, 1).font = Font(name="Calibri", color="167568", underline="single")
         details.append(["", "", "", ""])
         selected_groups = set(diagnosis_group_codes(record))
-        matrix.append([case_id, patient, text(record.get("id")), *[int(code in selected_groups) for code in DIAGNOSIS_GROUPS]])
+        matrix.append([case_id, text(record.get("id")), *[int(code in selected_groups) for code in DIAGNOSIS_GROUPS]])
         for cell in details[start]:
             cell.fill = PatternFill("solid", fgColor="167568")
             cell.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
@@ -829,11 +795,11 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
     if not rows:
         details.append([heading("No saved evaluations to export.")])
 
-    for ws, widths in [(overview, [20, 26, 18, 16, 22, 44, 22]), (details, [34, 36, 20, 32]), (matrix, [20, 26, 24] + [22] * len(DIAGNOSIS_GROUPS))]:
+    for ws, widths in [(overview, [28, 64, 26]), (details, [34, 36, 20, 32]), (matrix, [28, 24] + [22] * len(DIAGNOSIS_GROUPS))]:
         ws.sheet_view.showGridLines = False
         ws.sheet_properties.pageSetUpPr.fitToPage = True
         ws.sheet_properties.outlinePr.summaryRight = False
-        ws.freeze_panes = "C2" if ws != details else "B4"
+        ws.freeze_panes = "B2" if ws != details else "B4"
         ws.print_options.horizontalCentered = True
         ws.page_setup.orientation = "landscape" if ws != details else "portrait"
         ws.page_setup.paperSize = ws.PAPERSIZE_A4
@@ -866,7 +832,7 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
             for row in ws.iter_rows(min_row=2):
                 ws.row_dimensions[row[0].row].height = max(36, min(160, 16 * max((len(str(cell.value or "")) // widths[cell.column-1] + 1) for cell in row) + 12))
     if rows:
-        matrix.conditional_formatting.add(f"D2:S{matrix.max_row}", CellIsRule(operator="equal", formula=["1"], fill=PatternFill("solid", fgColor="DDEFE2"), font=Font(color="145B3C", bold=True)))
+        matrix.conditional_formatting.add(f"C2:R{matrix.max_row}", CellIsRule(operator="equal", formula=["1"], fill=PatternFill("solid", fgColor="DDEFE2"), font=Font(color="145B3C", bold=True)))
     return wb
 
 
@@ -880,10 +846,10 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[]), lang: str =
         document = Document()
         document.add_heading("Hospital Rehabilitation Checklist Records", 0)
         for record in rows:
-            document.add_heading(record.get("patientName") or "Unnamed patient", level=1)
+            document.add_heading(record.get("caseId") or "Case ID missing", level=1)
             table = document.add_table(rows=0, cols=2)
             table.style = "Light Shading Accent 1"
-            fields = [("Record ID", record.get("id", "")), ("Case ID", record.get("caseId", "")), ("Chart No", record.get("chartNo", "")), ("Exam Date", record.get("examDate", "")), ("Physician", record.get("physician", "")), ("Primary diagnosis group", primary_diagnosis_group(record)), ("Functional classifications", "; ".join(record.get("functional", []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []))), ("Medication / notes", record.get("medication", ""))]
+            fields = [("Record ID", record.get("id", "")), ("Case ID", record.get("caseId", "")), ("Primary diagnosis group", primary_diagnosis_group(record)), ("Functional classifications", "; ".join(record.get("functional", []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []))), ("Medication / notes", record.get("medication", ""))]
             for label, value in fields:
                 cells = table.add_row().cells
                 cells[0].text, cells[1].text = label, str(value)
@@ -910,8 +876,8 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[]), lang: str =
                 style.fontName = "ChecklistCJK"
         story = [Paragraph("Hospital Rehabilitation Checklist Records", styles["Title"]), Spacer(1, 12)]
         for record in rows:
-            story.append(Paragraph(str(record.get("patientName") or "Unnamed patient"), styles["Heading2"]))
-            data = [["Field", "Value"]] + [[label, str(value or "")] for label, value in [("Record ID", record.get("id")), ("Case ID", record.get("caseId")), ("Chart No", record.get("chartNo")), ("Exam Date", record.get("examDate")), ("Physician", record.get("physician")), ("Primary diagnosis group", primary_diagnosis_group(record)), ("Functional classifications", "; ".join(record.get("functional", []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []))), ("Medication / notes", record.get("medication"))]]
+            story.append(Paragraph(str(record.get("caseId") or "Case ID missing"), styles["Heading2"]))
+            data = [["Field", "Value"]] + [[label, str(value or "")] for label, value in [("Record ID", record.get("id")), ("Case ID", record.get("caseId")), ("Primary diagnosis group", primary_diagnosis_group(record)), ("Functional classifications", "; ".join(record.get("functional", []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []))), ("Medication / notes", record.get("medication"))]]
             table = Table([[Paragraph(escape(str(cell)), styles["BodyText"]) for cell in row] for row in data], colWidths=[1.8*inch, 8.0*inch], repeatRows=1)
             table.setStyle(TableStyle([("BACKGROUND", (0,0),(-1,0), colors.HexColor("#bd7137")), ("TEXTCOLOR", (0,0),(-1,0), colors.white), ("GRID", (0,0),(-1,-1), .4, colors.HexColor("#dedede")), ("VALIGN", (0,0),(-1,-1), "TOP"), ("PADDING", (0,0),(-1,-1), 6)]))
             story.extend([table, Spacer(1, 12)])
