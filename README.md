@@ -130,3 +130,6 @@ Import-review checkboxes allow selecting unreviewed and ID-conflicting rows, inc
 
 
 The import-review Diagnosis column displays disease names from the case's selected checklist diagnoses, not the source diagnosis paragraph. It updates when checklist selections change. Raw file diagnosis notes remain separately editable in the case inspector. Cases without selected diagnoses explicitly show No diagnosis selected; an empty match is never presented as a confirmed disease.
+
+
+Review diagnosis names include their checklist group (for example Psychosocial disorder: Speech delay). Delete selected removes the selected rows only from the unsaved import, after confirmation. Discard duplicates rechecks the current preview after edits and removes only matching Case ID plus identical clinical content, retaining the first preview instance or the already-saved case. Conflicting same-ID cases remain available for review. Neither action deletes saved Records.

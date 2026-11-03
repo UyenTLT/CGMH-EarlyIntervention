@@ -220,12 +220,12 @@ with tempfile.TemporaryDirectory() as temp:
             assert page.locator('#commitImport').is_disabled()
             assert page.locator('#importReviewForm').is_visible()
             page.locator('#importReviewRows [data-review-open]').first.click()
-            assert 'Autism' in page.locator('#importReviewRows .review-disease-cell').first.inner_text()
+            assert 'Psychosocial disorder: Autism' in page.locator('#importReviewRows .review-disease-cell').first.inner_text()
             assert 'Clinical source narrative' not in page.locator('#importReviewRows .review-disease-cell').first.inner_text()
             assert 'Clinical source narrative' in page.locator('#importReviewForm [name=diagnosisNotes]').input_value()
             page.locator('#reviewDiagnosisChecklist details').first.locator('summary').click()
             page.locator('#reviewDiagnosisChecklist input[value=diag-01-epilepsy]').check()
-            assert 'Epilepsy' in page.locator('#importReviewRows .review-disease-cell').first.inner_text()
+            assert 'Brain: Epilepsy' in page.locator('#importReviewRows .review-disease-cell').first.inner_text()
             page.locator('#importReviewForm [type=submit]').click()
             page.locator('#commitImport').click()
             page.locator('#pendingImportBar').wait_for(state='hidden')
@@ -297,6 +297,29 @@ with tempfile.TemporaryDirectory() as temp:
                 assert len(page.request.get(API+'/api/records',headers=auth).json())==before
                 page.once('dialog',lambda dialog:dialog.accept());page.locator('#discardReviewImport').click()
                 print('PASS: actual Excel workbook: 1155 separate case previews, cross-sheet collision resolution, no records saved')
+            # Explicit preview deletion and identical-only duplicate discard.
+            page.locator('[data-tab=records]').click()
+            before_count=len(page.request.get(API+'/api/records',headers=auth).json())
+            page.locator('#caseWorkbook').set_input_files({'name':'actions.csv','mimeType':'text/csv','buffer':b'CASE ID,Diagnosis\nDEL-1,Autism\nDEL-2,Epilepsy\nCONFLICT,Autism\nCONFLICT,Epilepsy\n'})
+            page.locator('#importReviewDialog').wait_for(state='visible')
+            page.locator('#importReviewRows [data-review-select]').first.check()
+            assert page.locator('#deleteImportSelected').is_visible()
+            page.once('dialog',lambda dialog:dialog.accept());page.locator('#deleteImportSelected').click()
+            assert page.locator('#importReviewRows tr').count()==3
+            # Turn DEL-2 into an identical duplicate of the first conflicting case.
+            page.locator('#importReviewForm [name=caseId]').fill('CONFLICT')
+            page.locator('#importReviewForm [name=diagnosisNotes]').fill('Autism')
+            for value in ['diag-01-epilepsy','diag-02-autism']:
+                locator=page.locator('#reviewDiagnosisChecklist input[value="'+value+'"]')
+                locator.evaluate('(el)=>el.closest("details").open=true')
+                if value=='diag-01-epilepsy': locator.uncheck()
+                else: locator.check()
+            page.once('dialog',lambda dialog:dialog.accept());page.locator('#discardImportDuplicates').click()
+            assert page.locator('#importReviewRows tr').count()==2
+            diseases=page.locator('#importReviewRows .review-disease-cell').all_inner_texts()
+            assert any('Autism' in value for value in diseases) and any('Epilepsy' in value for value in diseases)
+            assert len(page.request.get(API+'/api/records',headers=auth).json())==before_count
+            page.once('dialog',lambda dialog:dialog.accept());page.locator('#discardReviewImport').click()
             # Large libraries show 100 options at a time without requiring typing.
             import json
             library=[{'id':f'scale-{i}','caseId':f'SCALE-{i:04d}','diagnoses':[]} for i in range(2232)]
