@@ -54,27 +54,36 @@ with tempfile.TemporaryDirectory() as temp:
             page.goto(WEB, wait_until='domcontentloaded')
             page.locator('#login').wait_for(state='visible')
             page.locator('#lang').click()
-            assert page.locator('#loginForm button').inner_text() == '登入'
+            assert page.locator('#loginForm button[type=submit]').inner_text() == '登入'
             assert page.locator('#connectionBanner').is_hidden()
             # The backend has not answered, yet the login UI is interactive.
             assert held
             page.locator('#loginForm [name=username]').fill('admin')
             page.locator('#loginForm [name=password]').fill('demo1234')
+            assert page.locator('#loginPassword').get_attribute('type')=='password'
+            page.locator('#toggleLoginPassword').click()
+            assert page.locator('#loginPassword').get_attribute('type')=='text'
+            assert page.locator('#loginPassword').input_value()=='demo1234'
+            assert page.locator('#toggleLoginPassword').inner_text()=='隱藏'
+            assert len(held)==1
+            page.locator('#toggleLoginPassword').click()
+            assert page.locator('#loginPassword').get_attribute('type')=='password'
+
             held.pop(0).abort()
             page.get_by_text('伺服器暫時無法連線。請重新連線；表單內容仍保留。', exact=True).first.wait_for()
-            page.locator('#loginForm button').click()
+            page.locator('#loginForm button[type=submit]').click()
             page.wait_for_timeout(100)
-            assert page.locator('#loginForm button').is_disabled()
+            assert page.locator('#loginForm button[type=submit]').is_disabled()
             assert len(held) == 1
             held.pop(0).abort()
-            page.locator('#loginForm button').wait_for(state='visible')
+            page.locator('#loginForm button[type=submit]').wait_for(state='visible')
             page.wait_for_timeout(100)
             assert page.locator('#loginForm [name=password]').input_value() == 'demo1234'
             assert '帳號或密碼錯誤' not in page.locator('#loginError').inner_text()
             page.unroute(API + '/api/**')
             page.locator('#retryConnection').click()
             page.locator('#connectionBanner').wait_for(state='hidden')
-            page.locator('#loginForm button').click()
+            page.locator('#loginForm button[type=submit]').click()
             page.locator('#dashboard').wait_for(state='visible')
             assert page.locator('#overview #recordForm').is_visible()
             assert page.locator('#editorDialog').count()==0
