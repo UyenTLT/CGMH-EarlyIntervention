@@ -124,3 +124,6 @@ Excel review opens the first case automatically. Each case has its own checkbox 
 
 
 Imports automatically skip rows with the same Case ID and identical extracted clinical fields, including identical already-saved cases. Rows with the same ID but different clinical content remain in review. This never deletes stored records. The review header reports the number skipped.
+
+
+Import-review checkboxes allow selecting unreviewed and ID-conflicting rows, including all rows on a review page. Selecting a row opens its checklist. Approval acts on the selected set when present. Save selected cases remains disabled until at least one selected case is approved and has a valid non-conflicting ID. Selection and approval counts are shown separately.

@@ -215,6 +215,10 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#caseWorkbook').set_input_files({'name':'cases.csv','mimeType':'text/csv','buffer':b'CASE ID,Diagnosis\nIMPORT-003,Autism\n'})
             page.locator('#importReviewDialog').wait_for(state='visible')
             assert page.locator('#commitImport').is_disabled()
+            assert page.locator('#importReviewRows [data-review-select]').first.is_enabled()
+            page.locator('#importReviewRows [data-review-select]').first.check()
+            assert page.locator('#commitImport').is_disabled()
+            assert page.locator('#importReviewForm').is_visible()
             page.locator('#importReviewRows [data-review-open]').first.click()
             page.locator('#importReviewForm [type=submit]').click()
             page.locator('#commitImport').click()
@@ -224,6 +228,11 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#caseWorkbook').set_input_files({'name':'review.csv','mimeType':'text/csv','buffer':b'CASE ID,Diagnosis\nSTATIC-001,Autism\nDUP,Autism\nDUP,Epilepsy\n,Speech delay\nNEW4,Autism\n'})
             page.locator('#importReviewDialog').wait_for(state='visible')
             assert page.locator('#importReviewRows tr').count()==5
+            page.locator('#selectImportPage').check()
+            assert page.locator('#importReviewRows input:checked').count()==5
+            assert page.locator('#commitImport').is_disabled()
+            page.locator('#selectImportPage').uncheck()
+            assert page.locator('#importReviewRows input:checked').count()==0
             assert len(page.request.get(API+'/api/records',headers=auth).json())==2
             page.once('dialog',lambda dialog:dialog.accept())
             page.locator('#approveImportResults').click()
