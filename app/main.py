@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSO
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
 from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import FormulaRule
@@ -725,6 +725,115 @@ def matrix_diagnoses(record: dict[str, Any], lang: str) -> tuple[dict[str, list[
     return grouped, unmapped
 
 
+def style_diagnosis_matrix(matrix, entries, lang: str):
+    """A case-by-diagnosis grid, with grouped headers and numeric check marks."""
+    chinese = lang == "zh-TW"
+    prepared = [(record, start, *matrix_diagnoses(record, lang)) for record, start in entries]
+    used = {(group, label) for _, _, grouped, _ in prepared for group, labels in grouped.items() for label in labels}
+    columns = []
+    for key, english in EXPORT_LABELS["english"].items():
+        if not key.startswith("diag-"):
+            continue
+        group = key.split("-", 2)[1]
+        label = EXPORT_LABELS["values"].get(key, english) if chinese else english.split(": ", 1)[-1]
+        if (group, label) in used:
+            columns.append((group, label, key))
+    has_unmapped = any(unmapped for _, _, _, unmapped in prepared)
+    last_column = max(3, 2 + len(columns) + int(has_unmapped))
+    last_letter = get_column_letter(last_column)
+    matrix.append([("診斷矩陣 · " if chinese else "") + f"DIAGNOSIS MATRIX  /  {len(entries)} CASES"])
+    legend = ("✓ 已選取　· 未選取　空白：尚未選取診斷；不代表排除疾病。\n" if chinese else "") + "✓ Selected   · Not selected   Blank: no checklist diagnosis selected. These marks do not exclude disease. Only diagnoses selected in this export are shown. Click a Case ID for details."
+    matrix.append([legend])
+    matrix.append(["個案 / CASES" if chinese else "CASES", ""])
+    matrix.append(["CASE ID", export_heading("Checklist selection", lang), *[(label + "\n" + EXPORT_LABELS["english"][key].split(": ", 1)[-1]) if chinese else label for _, label, key in columns], *([export_heading("Unmapped checklist items", lang)] if has_unmapped else [])])
+    if not columns and not has_unmapped:
+        matrix.cell(4, 3, export_heading("No checklist diagnosis selected", lang))
+    matrix.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_column)
+    matrix.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_column)
+    matrix.merge_cells("A3:B3")
+    palette = [("315C7C", "EAF2FA"), ("2C705C", "EAF5EF"), ("665987", "F0ECF7"), ("8C6444", "F8F0E8")]
+    group_bounds = []
+    for column, (group, label, key) in enumerate(columns, start=3):
+        if group_bounds and group_bounds[-1][0] == group:
+            group_bounds[-1][2] = column
+        else:
+            group_bounds.append([group, column, column])
+        matrix.cell(4, column).comment = Comment(key + "\n" + EXPORT_LABELS["english"][key], "Rehab Checklist")
+    for group, first, last in group_bounds:
+        title = f"{group}  {DIAGNOSIS_GROUPS[group]}"
+        if chinese:
+            title = f"{group}  {EXPORT_LABELS['groups'][group]}\n{DIAGNOSIS_GROUPS[group]}"
+        matrix.cell(3, first, title)
+        if first != last:
+            matrix.merge_cells(start_row=3, start_column=first, end_row=3, end_column=last)
+    if has_unmapped:
+        matrix.cell(3, last_column, "待核對 / REVIEW" if chinese else "REVIEW")
+    for row, (record, start, grouped, unmapped) in enumerate(prepared, start=5):
+        count = sum(len(items) for items in grouped.values())
+        status = export_heading("Check unmapped items", lang) if unmapped else (f"已選 {count} 項 / {count} selected" if chinese else f"{count} selected") if count else export_heading("No checklist diagnosis selected", lang)
+        matrix.append([str(record.get("caseId") or ""), status, *[int(label in grouped[group]) if count else None for group, label, _ in columns], *(["\n".join(unmapped)] if has_unmapped else [])])
+        matrix.cell(row, 1).hyperlink = f"#'Checklist details'!A{start}"
+    edge = Side(style="hair", color="DEE8E3")
+    for row in matrix:
+        for cell in row:
+            cell.font = Font(name="Calibri", size=11, color="324D43")
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+            if isinstance(cell.value, str):
+                cell.data_type = "s"
+            if cell.row >= 5:
+                cell.fill = PatternFill("solid", fgColor="F4F8F6" if cell.row % 2 == 0 else "FFFFFF")
+                cell.border = Border(bottom=edge, right=edge)
+                if cell.column >= 3 and cell.column <= 2 + len(columns):
+                    cell.number_format = '"✓";"✓";"·"'
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                    cell.font = Font(name="Calibri", size=13, color="B2BDB7")
+                if cell.column == 1:
+                    cell.font = Font(name="Calibri", size=11, bold=True, color="167568", underline="single")
+    for row, color in [(1, "173F35"), (2, "F0F5F2"), (3, "476358"), (4, "E7EFEB")]:
+        for cell in matrix[row]:
+            cell.fill = PatternFill("solid", fgColor=color)
+            cell.font = Font(name="Calibri", size=20 if row == 1 else 10 if row == 2 else 11, bold=row != 2, color="FFFFFF" if row in {1, 3} else "476358")
+            cell.alignment = Alignment(vertical="center", horizontal="left" if row <= 2 else "center", wrap_text=True)
+    for group, first, last in group_bounds:
+        dark, pale = palette[(int(group) - 1) % len(palette)]
+        for col in range(first, last + 1):
+            matrix.cell(3, col).fill = PatternFill("solid", fgColor=dark)
+            matrix.cell(4, col).fill = PatternFill("solid", fgColor=pale)
+            matrix.cell(4, col).font = Font(name="Calibri", size=11, bold=True, color=dark)
+            matrix.column_dimensions[get_column_letter(col)].width = 23
+    matrix.column_dimensions['A'].width = 23
+    matrix.column_dimensions['B'].width = 27
+    if has_unmapped:
+        matrix.column_dimensions[last_letter].width = 36
+    elif not columns:
+        matrix.column_dimensions['C'].width = 30
+    matrix.row_dimensions[1].height = 40
+    matrix.row_dimensions[2].height = (76 if chinese else 58) if last_column < 6 else (52 if chinese else 36)
+    matrix.row_dimensions[3].height = 52 if chinese else 38
+    matrix.row_dimensions[4].height = 126 if chinese else 92
+    for row in range(5, len(entries) + 5):
+        matrix.row_dimensions[row].height = 42 if chinese else 34
+        if has_unmapped:
+            value = str(matrix.cell(row, last_column).value or "")
+            matrix.row_dimensions[row].height = min(300, max(matrix.row_dimensions[row].height, len(value.splitlines()) * 16 + 12))
+    if entries and columns:
+        matrix.conditional_formatting.add(f"C5:{get_column_letter(2 + len(columns))}{len(entries) + 4}", FormulaRule(formula=['C5=1'], fill=PatternFill("solid", fgColor="D6EEE2"), font=Font(name="Calibri", color="146C4E", bold=True, size=14)))
+    matrix.freeze_panes = "C5"
+    matrix.auto_filter.ref = f"A4:{last_letter}{max(4, len(entries) + 4)}"
+    matrix.sheet_view.showGridLines = False
+    matrix.sheet_view.zoomScale = 90
+    matrix.sheet_properties.tabColor = "167568"
+    matrix.sheet_properties.pageSetUpPr.fitToPage = True
+    matrix.print_title_rows = "1:4"
+    matrix.print_title_cols = "A:B"
+    matrix.print_area = f"A1:{last_letter}{max(4, len(entries) + 4)}"
+    matrix.page_setup.orientation = "landscape"
+    matrix.page_setup.paperSize = matrix.PAPERSIZE_A3 if last_column > 12 else matrix.PAPERSIZE_A4
+    matrix.page_setup.fitToWidth = 1
+    matrix.page_setup.fitToHeight = 0
+    matrix.oddFooter.center.text = "Page &P of &N"
+
+
 def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Workbook:
     """Keep the daily case list compact and the clinical checklist readable."""
     def heading(value: str) -> str:
@@ -750,9 +859,7 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
     detail_merges.append(CellRange("A2:D2"))
     append_detail(["", "", "", ""])
     matrix = wb.create_sheet("Diagnosis matrix")
-    matrix.append(["CASE ID", heading("Checklist selection"), *[f"{code} — {EXPORT_LABELS['groups'][code]}\n{name}" if lang == "zh-TW" else f"{code} — {name}" for code, name in DIAGNOSIS_GROUPS.items()], heading("Unmapped checklist items")])
-    used_matrix_groups = set()
-    has_unmapped_items = False
+    matrix_entries = []
 
     def text(value: Any) -> str:
         return str(value or "")
@@ -814,13 +921,7 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
         details.cell(detail_row, 1).hyperlink = f"#'Case overview'!A{index + 1}"
         details.cell(detail_row, 1).font = Font(name="Calibri", color="167568", underline="single")
         append_detail(["", "", "", ""])
-        grouped, unmapped = matrix_diagnoses(record, lang)
-        used_matrix_groups.update(code for code, values in grouped.items() if values)
-        has_unmapped_items = has_unmapped_items or bool(unmapped)
-        selection_status = "Check unmapped items" if unmapped else "Selected" if any(grouped.values()) else "No checklist diagnosis selected"
-        matrix.append([case_id, heading(selection_status), *["\n".join(grouped[code]) for code in DIAGNOSIS_GROUPS], "\n".join(unmapped)])
-        matrix.cell(index + 1, 1).hyperlink = f"#'Checklist details'!A{start}"
-        matrix.cell(index + 1, 1).font = Font(name="Calibri", color="167568", underline="single")
+        matrix_entries.append((record, start))
         for column in range(1, 5):
             cell = details.cell(start, column)
             cell.fill = PatternFill("solid", fgColor="167568")
@@ -834,7 +935,7 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
     if not rows:
         append_detail([heading("No saved evaluations to export.")])
 
-    for ws, widths in [(overview, [28, 64, 26]), (details, [34, 36, 20, 32]), (matrix, [22, 28] + [36] * len(DIAGNOSIS_GROUPS) + [36])]:
+    for ws, widths in [(overview, [28, 64, 26]), (details, [34, 36, 20, 32])]:
         ws.sheet_view.showGridLines = False
         ws.sheet_properties.pageSetUpPr.fitToPage = True
         ws.sheet_properties.outlinePr.summaryRight = False
@@ -870,23 +971,7 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
                 ws.add_table(table)
             for row in ws.iter_rows(min_row=2):
                 ws.row_dimensions[row[0].row].height = max(36, min(160, 16 * max((len(str(cell.value or "")) // widths[cell.column-1] + 1) for cell in row) + 12))
-    matrix.freeze_panes = "C2"
-    matrix.sheet_view.zoomScale = 85
-    matrix.print_options.horizontalCentered = False
-    matrix.print_title_cols = "A:B"
-    for column, code in enumerate(DIAGNOSIS_GROUPS, start=3):
-        matrix.column_dimensions[get_column_letter(column)].hidden = bool(rows) and code not in used_matrix_groups
-    matrix.column_dimensions["S"].hidden = not has_unmapped_items
-    legend = ("每列為一筆已儲存紀錄；依檢核表分類顯示已選診斷。空白表示未選取，並非排除疾病。未使用的分類已隱藏，可在 Excel 中取消隱藏。點選個案編號可檢視完整檢核表。\n"
-              if lang == "zh-TW" else "") + "One saved record per row. Cells list selected checklist diagnoses in their category. Blank means not selected, not that disease is excluded. Unused categories are hidden; unhide columns to see all 16. Click a Case ID for its checklist."
-    matrix["A1"].comment = Comment(legend, "Rehab Checklist")
-    matrix["B1"].comment = Comment(legend, "Rehab Checklist")
-    if rows:
-        matrix.conditional_formatting.add(f"C2:S{matrix.max_row}", FormulaRule(formula=['LEN(C2)>0'], fill=PatternFill("solid", fgColor="DDEFE2"), font=Font(color="145B3C", bold=True)))
-        for row in matrix.iter_rows(min_row=2):
-            # Honor explicit line breaks when a case has several diagnoses.
-            lines = max(sum(max(1, (sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in segment) + 31) // 32) for segment in str(cell.value or "").split("\n")) for cell in row)
-            matrix.row_dimensions[row[0].row].height = min(400, max(36, lines * 16 + 12))
+    style_diagnosis_matrix(matrix, matrix_entries, lang)
     return wb
 
 
