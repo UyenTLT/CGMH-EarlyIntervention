@@ -9,7 +9,7 @@ from app.classifier import classify_text
 
 LABELS = json.loads((Path(__file__).parent / 'export_labels.json').read_text())
 ALIASES = {
-    'caseId': ['case id', 'case no', 'case number', 'caseid', 'case', '個案編號', '個案號碼'],
+    'caseId': ['case id', 'case no', 'case number', 'caseid', 'case', 'id', '個案id', '個案編號', '個案號碼'],
     'diagnosisNotes': ['diagnosis', 'diagnoses', 'diagnostic items', 'diagnosis text', 'diagnosis notes', 'diagnosis summary', 'clinical diagnosis', '診斷', '診斷內容', '診斷補充說明', '診斷項目'],
     'functional': ['functional classifications', 'functional classification', 'functional diagnostic classification', '功能性診斷分類', '功能分類'],
     'management': ['management', 'treatment', 'treatment plan', 'rehabilitation', 'rehabilitation programs', 'management interventions', '處置', '處置計畫', '處置與介入', '復健計畫'],
@@ -39,13 +39,25 @@ def canonical_items(text, group):
     return selected, '\n'.join(notes)
 
 
-def preview_import(datasets, existing, filename):
+def preview_import(datasets, existing, filename, mapping=None):
     known = {str(row.get('caseId') or '').strip().casefold() for row in existing}
     seen, records, found, ignored = set(), [], False, []
     aliases = {key: {normalized(value) for value in values} for key, values in ALIASES.items()}
     for sheet, table in datasets:
+        if mapping and sheet != mapping.get('sheet'):
+            continue
         header_index, columns = None, None
-        for index, row in enumerate(table[:20]):
+        if mapping:
+            header_index = mapping.get('headerRow', 1) - 1
+            selected = mapping.get('columns', {})
+            if not isinstance(header_index, int) or header_index < 0 or header_index >= len(table) or not isinstance(selected.get('caseId'), int):
+                raise ValueError('Invalid column mapping')
+            width = len(table[header_index])
+            if any(not isinstance(col, int) or isinstance(col, bool) or col < 0 or col >= width for col in selected.values()):
+                raise ValueError('Invalid column mapping')
+            columns = {key: [selected[key]] if key in selected else [] for key in aliases}
+
+        for index, row in enumerate(table[:30]) if not mapping else []:
             detected = {key: [i for i, cell in enumerate(row) if any(normalized(line) in names for line in str(cell or '').splitlines())] for key, names in aliases.items()}
             if detected['caseId']:
                 header_index, columns = index, detected

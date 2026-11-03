@@ -32,3 +32,21 @@ class ImportReviewTests(unittest.TestCase):
         self.assertEqual(row['diagnoses'],[])
         self.assertEqual(row['diagnosisNotes'],'')
         self.assertIn('no_clinical_data',row['importMeta']['issues'])
+
+
+class ExcelUploadTests(unittest.TestCase):
+    def test_xlsx_mapping_and_formatted_case_id(self):
+        import asyncio, io, json
+        from unittest.mock import patch
+        from fastapi import UploadFile
+        from openpyxl import Workbook
+        from app.main import import_cases
+        book=Workbook();sheet=book.active;sheet.title='Source';sheet.append(['Identifier','Condition']);sheet.append([12,'Autism']);sheet['A2'].number_format='0000'
+        stream=io.BytesIO();book.save(stream);raw=stream.getvalue()
+        with patch('app.main.read_records',return_value=[]):
+            first=asyncio.run(import_cases(UploadFile(filename='example.xlsx',file=io.BytesIO(raw))))
+            self.assertEqual(first.status_code,422)
+            self.assertEqual(json.loads(first.body)['detail']['code'],'column_mapping_required')
+            result=asyncio.run(import_cases(UploadFile(filename='example.xlsx',file=io.BytesIO(raw)),mapping=json.dumps({'sheet':'Source','headerRow':1,'columns':{'caseId':0,'diagnosisNotes':1}})))
+        self.assertEqual(result['records'][0]['caseId'],'0012')
+        self.assertEqual(result['records'][0]['diagnosisNotes'],'Autism')

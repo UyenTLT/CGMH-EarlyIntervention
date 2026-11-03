@@ -236,6 +236,38 @@ with tempfile.TemporaryDirectory() as temp:
             page.once('dialog',lambda dialog:dialog.accept())
             page.locator('#discardReviewImport').click()
             page.locator('#importReviewDialog').wait_for(state='hidden')
+            # Real XLSX upload with nonstandard headers must offer column mapping.
+            import io
+            from openpyxl import Workbook
+            excel=Workbook();sheet=excel.active;sheet.title='Mapping';sheet.append(['Identifier','Condition']);sheet.append(['XLSX-01','Autism']);sheet.append(['XLSX-02','Epilepsy']);stream=io.BytesIO();excel.save(stream)
+            page.locator('#caseWorkbook').set_input_files({'name':'nonstandard.xlsx','mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','buffer':stream.getvalue()})
+            page.locator('#columnMappingDialog').wait_for(state='visible')
+            page.locator('[data-column-field=caseId]').select_option('0')
+            page.locator('[data-column-field=diagnosisNotes]').select_option('1')
+            page.locator('#columnMappingForm [type=submit]').click()
+            page.locator('#importReviewDialog').wait_for(state='visible')
+            assert page.locator('#importReviewForm [name=caseId]').input_value()=='XLSX-01'
+            page.locator('#importReviewForm [name=diagnosisNotes]').fill('Edited first case')
+            page.locator('#nextReviewCase').click()
+            assert page.locator('#importReviewForm [name=caseId]').input_value()=='XLSX-02'
+            assert page.locator('#importReviewForm [name=diagnosisNotes]').input_value()=='Epilepsy'
+            page.locator('#prevReviewCase').click()
+            assert page.locator('#importReviewForm [name=diagnosisNotes]').input_value()=='Edited first case'
+            page.once('dialog',lambda dialog:dialog.accept());page.locator('#discardReviewImport').click()
+            if os.environ.get('ACTUAL_IMPORT_FILE'):
+                before=len(page.request.get(API+'/api/records',headers=auth).json())
+                page.locator('#caseWorkbook').set_input_files(os.environ['ACTUAL_IMPORT_FILE'])
+                page.locator('#importReviewDialog').wait_for(state='visible')
+                assert page.locator('#importReviewSummary b').first.inner_text()=='1155'
+                assert page.locator('#importReviewForm').is_visible()
+                page.once('dialog',lambda dialog:dialog.accept());page.locator('#separateImportSheets').click()
+                assert page.locator('#importReviewSummary b').nth(3).inner_text()=='0'
+                first=page.locator('#importReviewForm [name=caseId]').input_value()
+                page.locator('#nextReviewCase').click()
+                assert page.locator('#importReviewForm [name=caseId]').input_value()!=first
+                assert len(page.request.get(API+'/api/records',headers=auth).json())==before
+                page.once('dialog',lambda dialog:dialog.accept());page.locator('#discardReviewImport').click()
+                print('PASS: actual Excel workbook: 1155 separate case previews, cross-sheet collision resolution, no records saved')
             # Large libraries show 100 options at a time without requiring typing.
             import json
             library=[{'id':f'scale-{i}','caseId':f'SCALE-{i:04d}','diagnoses':[]} for i in range(2232)]

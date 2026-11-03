@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -458,11 +458,11 @@ def delete_records_bulk(body: DeleteRecordsRequest):
 
 
 @app.post("/api/import-cases", dependencies=[Depends(auth)])
-async def import_cases(file: UploadFile = File(...)):
+async def import_cases(file: UploadFile = File(...), mapping: str | None = Form(default=None)):
     name = (file.filename or "").lower()
     extension = Path(name).suffix
-    if extension not in {".xlsx", ".csv", ".txt"}:
-        raise HTTPException(415, "Choose an .xlsx, .csv, or .txt file")
+    if extension not in {".xlsx", ".xls", ".csv", ".txt"}:
+        raise HTTPException(415, "Choose an .xlsx, .xls, .csv, or .txt file")
     raw = await file.read()
     if len(raw) > 30 * 1024 * 1024:
         raise HTTPException(413, "Import file exceeds 30 MB limit")
@@ -471,10 +471,28 @@ async def import_cases(file: UploadFile = File(...)):
         try:
             from openpyxl import load_workbook
             workbook = load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
-            datasets = [(sheet.title, list(sheet.iter_rows(values_only=True))) for sheet in workbook.worksheets]
+            datasets = []
+            for sheet in workbook.worksheets:
+                table = []
+                for cells in sheet.iter_rows():
+                    values = []
+                    for cell in cells:
+                        value = cell.value
+                        if isinstance(value, (int, float)) and not isinstance(value, bool) and float(value).is_integer() and re.fullmatch(r"0{2,}", cell.number_format or ""):
+                            value = str(int(value)).zfill(len(cell.number_format))
+                        values.append(value)
+                    table.append(tuple(values))
+                datasets.append((sheet.title, table))
             workbook.close()
         except Exception as exc:
             raise HTTPException(422, "Could not read the Excel workbook") from exc
+    elif extension == ".xls":
+        try:
+            import xlrd
+            book = xlrd.open_workbook(file_contents=raw)
+            datasets = [(sheet.name, [tuple(sheet.row_values(i)) for i in range(sheet.nrows)]) for sheet in book.sheets()]
+        except Exception as exc:
+            raise HTTPException(422, "Could not read the legacy Excel workbook") from exc
     else:
         text = None
         for encoding in ("utf-8-sig", "utf-16", "cp950", "cp1252"):
@@ -543,10 +561,16 @@ async def import_cases(file: UploadFile = File(...)):
                 datasets = [(Path(name).stem or "TXT", [tuple(fields.values()), *records])]
     from app.importing import preview_import
     try:
-        return preview_import(datasets, read_records(), file.filename or name)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
+        options = json.loads(mapping) if isinstance(mapping, str) and mapping else None
+        if options is not None and not isinstance(options, dict):
+            raise ValueError('Invalid column mapping')
+        result = preview_import(datasets, read_records(), file.filename or name, options)
+        if not result['records']:
+            raise ValueError('No cases found below the selected header row')
+        return result
+    except (ValueError, TypeError) as exc:
+        sheets = [{'name': sheet, 'rows': [[str(value or '')[:100] for value in row[:60]] for row in table[:30]]} for sheet, table in datasets if table]
+        return JSONResponse(status_code=422, content={'detail': {'code': 'column_mapping_required', 'message': str(exc), 'sheets': sheets}})
 
 
 @app.delete("/api/records/{record_id}", dependencies=[Depends(auth)])
