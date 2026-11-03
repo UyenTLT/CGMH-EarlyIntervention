@@ -240,7 +240,9 @@ with tempfile.TemporaryDirectory() as temp:
             import io
             from openpyxl import Workbook
             excel=Workbook();sheet=excel.active;sheet.title='Mapping';sheet.append(['Identifier','Condition']);sheet.append(['XLSX-01','Autism']);sheet.append(['XLSX-02','Epilepsy']);stream=io.BytesIO();excel.save(stream)
-            page.locator('#caseWorkbook').set_input_files({'name':'nonstandard.xlsx','mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','buffer':stream.getvalue()})
+            page.locator('[data-tab=overview]').click()
+            assert page.locator('#sourceText').is_hidden()
+            page.locator('#upload').set_input_files({'name':'nonstandard.xlsx','mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','buffer':stream.getvalue()})
             page.locator('#columnMappingDialog').wait_for(state='visible')
             page.locator('[data-column-field=caseId]').select_option('0')
             page.locator('[data-column-field=diagnosisNotes]').select_option('1')
@@ -255,11 +257,14 @@ with tempfile.TemporaryDirectory() as temp:
             assert page.locator('#importReviewForm [name=diagnosisNotes]').input_value()=='Edited first case'
             page.once('dialog',lambda dialog:dialog.accept());page.locator('#discardReviewImport').click()
             if os.environ.get('ACTUAL_IMPORT_FILE'):
+                page.locator('[data-tab=overview]').click()
                 before=len(page.request.get(API+'/api/records',headers=auth).json())
-                page.locator('#caseWorkbook').set_input_files(os.environ['ACTUAL_IMPORT_FILE'])
+                page.locator('#upload').set_input_files(os.environ['ACTUAL_IMPORT_FILE'])
                 page.locator('#importReviewDialog').wait_for(state='visible')
                 assert page.locator('#importReviewSummary b').first.inner_text()=='1155'
                 assert page.locator('#importReviewForm').is_visible()
+                assert page.locator('#reviewSourceText').is_hidden()
+                assert page.locator('#nextReviewCase').inner_text() in ['Next','下一個案']
                 page.once('dialog',lambda dialog:dialog.accept());page.locator('#separateImportSheets').click()
                 assert page.locator('#importReviewSummary b').nth(3).inner_text()=='0'
                 first=page.locator('#importReviewForm [name=caseId]').input_value()
