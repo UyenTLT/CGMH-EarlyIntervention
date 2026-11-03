@@ -726,7 +726,7 @@ def matrix_diagnoses(record: dict[str, Any], lang: str) -> tuple[dict[str, list[
 
 
 def style_diagnosis_matrix(matrix, entries, lang: str):
-    """A case-by-diagnosis grid, with grouped headers and numeric check marks."""
+    """A case-by-diagnosis grid, with grouped headers and visible binary values."""
     chinese = lang == "zh-TW"
     prepared = [(record, start, *matrix_diagnoses(record, lang)) for record, start in entries]
     used = {(group, label) for _, _, grouped, _ in prepared for group, labels in grouped.items() for label in labels}
@@ -742,7 +742,7 @@ def style_diagnosis_matrix(matrix, entries, lang: str):
     last_column = max(3, 2 + len(columns) + int(has_unmapped))
     last_letter = get_column_letter(last_column)
     matrix.append([("診斷矩陣 · " if chinese else "") + f"DIAGNOSIS MATRIX  /  {len(entries)} CASES"])
-    legend = ("✓ 已選取　· 未選取　空白：尚未選取診斷；不代表排除疾病。\n" if chinese else "") + "✓ Selected   · Not selected   Blank: no checklist diagnosis selected. These marks do not exclude disease. Only diagnoses selected in this export are shown. Click a Case ID for details."
+    legend = ("1 已選取　0 未選取；不代表排除疾病。\n" if chinese else "") + "1 = Selected   0 = Not selected. These marks do not exclude disease. Only diagnoses selected in this export are shown. Click a Case ID for details."
     matrix.append([legend])
     matrix.append(["個案 / CASES" if chinese else "CASES", ""])
     matrix.append(["CASE ID", export_heading("Checklist selection", lang), *[(label + "\n" + EXPORT_LABELS["english"][key].split(": ", 1)[-1]) if chinese else label for _, label, key in columns], *([export_heading("Unmapped checklist items", lang)] if has_unmapped else [])])
@@ -771,7 +771,7 @@ def style_diagnosis_matrix(matrix, entries, lang: str):
     for row, (record, start, grouped, unmapped) in enumerate(prepared, start=5):
         count = sum(len(items) for items in grouped.values())
         status = export_heading("Check unmapped items", lang) if unmapped else (f"已選 {count} 項 / {count} selected" if chinese else f"{count} selected") if count else export_heading("No checklist diagnosis selected", lang)
-        matrix.append([str(record.get("caseId") or ""), status, *[int(label in grouped[group]) if count else None for group, label, _ in columns], *(["\n".join(unmapped)] if has_unmapped else [])])
+        matrix.append([str(record.get("caseId") or ""), status, *[int(label in grouped[group]) for group, label, _ in columns], *(["\n".join(unmapped)] if has_unmapped else [])])
         matrix.cell(row, 1).hyperlink = f"#'Checklist details'!A{start}"
     edge = Side(style="hair", color="DEE8E3")
     for row in matrix:
@@ -784,9 +784,9 @@ def style_diagnosis_matrix(matrix, entries, lang: str):
                 cell.fill = PatternFill("solid", fgColor="F4F8F6" if cell.row % 2 == 0 else "FFFFFF")
                 cell.border = Border(bottom=edge, right=edge)
                 if cell.column >= 3 and cell.column <= 2 + len(columns):
-                    cell.number_format = '"✓";"✓";"·"'
+                    cell.number_format = "0"
                     cell.alignment = Alignment(horizontal="center", vertical="center")
-                    cell.font = Font(name="Calibri", size=13, color="B2BDB7")
+                    cell.font = Font(name="Calibri", size=13, color="5D7065")
                 if cell.column == 1:
                     cell.font = Font(name="Calibri", size=11, bold=True, color="167568", underline="single")
     for row, color in [(1, "173F35"), (2, "F0F5F2"), (3, "476358"), (4, "E7EFEB")]:

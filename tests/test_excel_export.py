@@ -38,7 +38,9 @@ class ChecklistWorkbookTests(unittest.TestCase):
         self.assertEqual(matrix['C3'].value, '01  Brain')
         self.assertEqual(matrix['D3'].value, '02  Psychosocial disorder')
         self.assertNotIn('Record ID', [cell.value for cell in matrix[4]])
-        self.assertIn('✓', matrix['C5'].number_format)
+        self.assertEqual(matrix['C5'].number_format, '0')
+        self.assertIn('1 = Selected', matrix['A2'].value)
+        self.assertIn('0 = Not selected', matrix['A2'].value)
         self.assertEqual(matrix.auto_filter.ref, 'A4:D5')
 
     def test_matrix_preserves_multiple_diagnoses_and_unclassified_cases(self):
@@ -49,7 +51,7 @@ class ChecklistWorkbookTests(unittest.TestCase):
         self.assertEqual([cell.value for cell in matrix[5]][2:], [1, 1])
         self.assertEqual(matrix['B5'].value, '2 selected')
         self.assertEqual(matrix['B6'].value, 'No checklist diagnosis selected')
-        self.assertTrue(all(cell.value is None for cell in matrix[6][2:]))
+        self.assertTrue(all(cell.value == 0 for cell in matrix[6][2:]))
         self.assertIn('C3:D3', [str(r) for r in matrix.merged_cells])
         self.assertIn('do not exclude disease', matrix['A2'].value)
 
