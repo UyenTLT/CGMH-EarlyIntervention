@@ -55,7 +55,7 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#login').wait_for(state='visible')
             page.locator('#lang').click()
             assert page.locator('#loginForm button').inner_text() == '登入'
-            page.locator('#connectionBanner').wait_for(state='visible')
+            assert page.locator('#connectionBanner').is_hidden()
             # The backend has not answered, yet the login UI is interactive.
             assert held
             page.locator('#loginForm [name=username]').fill('admin')
@@ -91,18 +91,17 @@ with tempfile.TemporaryDirectory() as temp:
             assert '已選取 1 筆' in page.locator('#selectionStatus').inner_text()
             # Legacy data must not be displayed or searched, and editing must preserve it.
             auth = {'Authorization': 'Bearer ' + page.evaluate('sessionStorage.token')}
-            legacy = page.request.post(API + '/api/records', headers=auth, data={'caseId':'LEGACY-002', 'patientName':'REMOVED-NAME', 'chartNo':'REMOVED-CHART', 'examDate':'2099-12-31', 'physician':'REMOVED-DOCTOR'}).json()
+            legacy = page.request.post(API + '/api/records', headers=auth, data={'caseId':'LEGACY-002', 'patientName':'REMOVED-NAME', 'chartNo':'REMOVED-CHART', 'examDate':'2099-12-31', 'physician':'REMOVED-DOCTOR','importedAt':'2026-01-01T12:00:00'}).json()
             page.reload();page.locator('#dashboard').wait_for(state='visible');page.locator('[data-tab=records]').click()
             page.locator('#recordRows').get_by_text('LEGACY-002', exact=True).wait_for()
             assert 'REMOVED-NAME' not in page.locator('#recordRows').inner_text()
             page.locator('[data-tab=overview]').click()
-            page.locator('#overviewCaseRows').get_by_text('LEGACY-002', exact=True).wait_for()
+            assert page.locator('#overviewCaseRows, .case-overview').count()==0
             dashboard_text=page.locator('#overview').inner_text()
             for removed in ['REMOVED-NAME','REMOVED-CHART','2099-12-31','REMOVED-DOCTOR','Patient name','Chart number','Examination date']:
                 assert removed not in dashboard_text
-            assert page.locator('#overviewCaseRows tr').count()==2
             page.locator('#lang').click()
-            assert page.locator('#overview').get_by_role('columnheader',name='Case ID',exact=True).count()==1
+            assert page.locator('#overview #recordForm').is_visible()
             page.locator('#lang').click()
             page.locator('[data-tab=records]').click()
 
@@ -132,7 +131,7 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#applyCaseFilter').click()
             assert page.locator('#recordRows tr').count()==2
             assert '2' in page.locator('#casePickerText').inner_text()
-            page.locator('#selectMatches').click()
+            page.locator('#selectAll').click()
             assert page.locator('#selectedCases button').count()==2
             page.locator('#caseIdPicker summary').click()
             page.locator('#casePickerOptions input[value="LEGACY-002"]').uncheck()
@@ -147,7 +146,7 @@ with tempfile.TemporaryDirectory() as temp:
             assert page.locator('#export').is_disabled()
             filter_text('STATIC-001, LEGACY-002')
             assert page.locator('#recordRows tr').count()==2
-            page.locator('#selectMatches').click()
+            page.locator('#selectAll').click()
             assert page.locator('#selectedCases button').count()==2
             filter_text('STATIC-001')
             assert page.locator('#selectedCases button').count()==2
@@ -181,9 +180,25 @@ with tempfile.TemporaryDirectory() as temp:
             assert page.locator('#export').inner_text().strip().endswith('Download')
             if os.environ.get('ARTIFACT_DIR'):
                 page.screenshot(path=str(artifact_dir / 'records-ui-en.png'), full_page=True)
-            page.locator('.records-filter summary').click()
             assert page.locator('#importDate').is_visible()
-            page.locator('.records-filter summary').click()
+            filter_text('')
+            page.locator('#importDate').fill('2026-01-01')
+            assert page.locator('#recordRows tr').count()==1
+            assert 'LEGACY-002' in page.locator('#recordRows').inner_text()
+            page.locator('#clearDateFilter').click()
+            assert page.locator('#recordRows tr').count()==2
+            page.locator('#clearSelection').click()
+            assert page.locator('#deleteSelected').is_hidden()
+            page.locator('#search').evaluate('(el)=>{el.value="LEGACY-002";el.dispatchEvent(new Event("input"))}')
+            page.locator('#selectAll').click()
+            assert page.locator('#deleteSelected').is_visible()
+            page.once('dialog',lambda dialog:dialog.dismiss())
+            page.locator('#deleteSelected').click()
+            assert page.locator('#recordRows tr').count()==1
+            page.once('dialog',lambda dialog:dialog.accept())
+            page.locator('#deleteSelected').click()
+            page.locator('#recordRows tr').wait_for(state='detached')
+            assert len(page.request.get(API+'/api/records',headers=auth).json())==1
             page.reload()
             page.locator('#dashboard').wait_for(state='visible')
             page.locator('[data-tab=records]').click()
@@ -200,6 +215,11 @@ with tempfile.TemporaryDirectory() as temp:
             library=[{'id':f'scale-{i}','caseId':f'SCALE-{i:04d}','diagnoses':[]} for i in range(2232)]
             page.route(API+'/api/records',lambda route:route.fulfill(json=library))
             page.reload();page.locator('#dashboard').wait_for(state='visible');page.locator('[data-tab=records]').click()
+            page.locator('#selectAll').click()
+            assert page.locator('#selectedCases button').count()==2232
+            assert page.locator('#deleteSelected').is_visible()
+            page.locator('#clearSelection').click()
+            assert page.locator('#deleteSelected').is_hidden()
             page.locator('#caseIdPicker summary').click()
             page.locator('#casePickerOptions input').first.wait_for()
             assert page.locator('#casePickerOptions input').count()==100
@@ -207,6 +227,9 @@ with tempfile.TemporaryDirectory() as temp:
             assert page.locator('#casePickerOptions input').count()==200
             page.locator('#search').fill('SCALE-2231')
             assert page.locator('#casePickerOptions input').count()==1
+            assert page.locator('#casePickerOptions mark').inner_text()=='SCALE-2231'
+            page.locator('#search').press('ArrowDown')
+            assert page.locator('#casePickerOptions input').evaluate('(el)=>el===document.activeElement')
             page.locator('#casePickerOptions input').check()
             page.locator('#applyCaseFilter').click()
             assert page.locator('#recordRows tr').count()==1

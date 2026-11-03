@@ -24,8 +24,8 @@ const localMode=location.protocol==='file:';let localRecords=[],localUsers=[{use
 const apiBase=String(window.CHECKLIST_CONFIG?.apiBase||'').replace(/\/$/,'');
 let connectionState='idle',pendingRequests=0,wakeRequest=null;
 function renderConnection(){
- const banner=$('#connectionBanner');banner.hidden=!['connecting','offline'].includes(connectionState)||localMode;
- $('#connectionMessage').textContent=t(connectionState==='offline'?'connectionFailed':'connecting');
+ const banner=$('#connectionBanner');banner.hidden=connectionState!=='offline'||localMode;
+ $('#connectionMessage').textContent=connectionState==='offline'?t('connectionFailed'):'';
  $('#retryConnection').hidden=connectionState!=='offline';
 }
 async function backendFetch(path,options={}){
@@ -131,12 +131,12 @@ function drawRows(source){
 }
 function updateSelectionStatus(){
  const n=selectedRecordIds.size;$('#selectionStatus').textContent=n?t('selectedCount').replace('{n}',n):t('selectExportHint');
- $('#deleteSelected').disabled=n===0;$('#export').disabled=n===0;$('#clearSelection').disabled=n===0;
+ $('#deleteSelected').disabled=n===0;$('#deleteSelected').hidden=n===0;$('#export').disabled=n===0;$('#clearSelection').disabled=n===0;
  $('#selectedCases').innerHTML=[...selectedRecordIds].map(id=>{const row=cachedRecords.find(row=>String(row.id)===id);return `<button type="button" class="selected-case" data-unselect="${esc(id)}" aria-label="${esc(t('unselectCase'))} ${esc(row?.caseId||t('missingCaseId'))}">${esc(row?.caseId||t('missingCaseId'))} ×</button>`}).join('');
  $('#selectedCases').querySelectorAll('[data-unselect]').forEach(button=>button.onclick=()=>{selectedRecordIds.delete(button.dataset.unselect);drawRows(cachedRecords)});
  const selectable=[...$('#recordRows').querySelectorAll('[data-select-id]:not(:disabled)')];$('#selectVisible').checked=selectable.length>0&&selectable.every(box=>box.checked);$('#selectVisible').indeterminate=selectable.some(box=>box.checked)&&!$('#selectVisible').checked;
 }
-$('#selectMatches').onclick=()=>{for(const row of sortedRecordRows(cachedRecords,$('#search').value.toLowerCase(),$('#importDate').value))if(!row.pendingImport)selectedRecordIds.add(String(row.id));drawRows(cachedRecords)};
+$('#selectAll').onclick=()=>{for(const row of sortedRecordRows(cachedRecords,$('#search').value.toLowerCase(),$('#importDate').value))if(!row.pendingImport)selectedRecordIds.add(String(row.id));drawRows(cachedRecords)};
 $('#clearSelection').onclick=()=>{selectedRecordIds.clear();drawRows(cachedRecords)};
 
 $('#selectVisible').onchange=()=>{const q=$('#search').value.toLowerCase(),allRows=sortedRecordRows(cachedRecords,q,$('#importDate').value).filter(r=>!r.pendingImport),pageRows=allRows.slice((recordsPage-1)*recordsPageSize,recordsPage*recordsPageSize);for(const r of pageRows)if($('#selectVisible').checked)selectedRecordIds.add(String(r.id));else selectedRecordIds.delete(String(r.id));drawRows(cachedRecords)};
@@ -152,9 +152,7 @@ function drawOverview(rows){
  $('#statToday').textContent=rows.filter(r=>String(r.importedAt||'').slice(0,10)===today).length;
  const classified=rows.filter(r=>r.diagnoses&&r.diagnoses.length).length;
  $('#statClassified').textContent=rows.length?`${Math.round(classified*100/rows.length)}%`:'0%';
- const recent=rows.slice().sort((a,b)=>String(b.importedAt||'').localeCompare(String(a.importedAt||''))||String(a.caseId||'').localeCompare(String(b.caseId||''))).slice(0,5);
- $('#overviewCaseRows').innerHTML=recent.map(r=>`<tr><td><b class="case-identity">${esc(r.caseId||t('missingCaseId'))}</b></td><td>${orderedDiagnosisValues(r).map(value=>`<span class="tag">${esc(diagnosisLabel(value))}</span>`).join(' ')||esc(t('needsReview'))}</td></tr>`).join('');
- $('#overviewCaseEmpty').hidden=recent.length>0;
+
 }
 
 function bindRowActions(container,rows){container.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editRecord(rows.find(x=>x.id===b.dataset.edit)))}
@@ -186,8 +184,8 @@ $('#diagnoses').addEventListener('change',filterDiagnoses);
 Object.assign(tr.en,{noDiagnosisMatches:'No matching diagnoses. Try another term.',caseId:'Case ID',findDiagnosis:'Find a diagnosis',matchingGroups:'{n} matching groups',sourceHelp:'Optional: extract one source document. Import case lists in Records.',filetypes:'XLSX, XLS, DOCX, PDF, PNG, JPG · up to 15 MB',overviewHelp:'Activity summary. Use New record to complete a checklist or Records to import and export case lists.',monthHint:'Records added this month',export:'Download',selectExportHint:'No selection: download all saved records. Search filters do not limit the export.',searchHelp:'Find a record by Case ID.'});
 Object.assign(tr['zh-TW'],{noDiagnosisMatches:'找不到符合的診斷，請嘗試其他關鍵字。',caseId:'個案編號',findDiagnosis:'搜尋診斷',matchingGroups:'符合的分類：{n} 組',sourceHelp:'選填：擷取單一來源文件。個案清單請至「紀錄」匯入。',filetypes:'XLSX、XLS、DOCX、PDF、PNG、JPG · 上限 15 MB',overviewHelp:'評估活動摘要。請至「新增紀錄」填寫檢核表，或至「紀錄」匯入及匯出個案清單。',monthHint:'本月新增的紀錄',export:'下載',selectExportHint:'未勾選時匯出所有已儲存紀錄；搜尋條件不會限制匯出範圍。',searchHelp:'依個案編號搜尋紀錄。'});
 
-Object.assign(tr.en,{skippedDuplicates:' · {n} duplicates skipped',retry:'Reconnect',connecting:'Connecting to your workspace. You can choose your language while the server starts.',connectionFailed:'The server is temporarily unavailable. Please reconnect; your form has not been cleared.',signingIn:'Signing in…',storageHelp:'Saved evaluations are shared with your team.',recordId:'Record ID',selectRecord:'Select record',unnamed:'Unnamed patient',functionalTitle:'Functional classification',diagnosisTitle:'Diagnosis',managementTitle:'Management & interventions'});
-Object.assign(tr['zh-TW'],{skippedDuplicates:' · 略過 {n} 筆重複資料',retry:'重新連線',connecting:'正在連接工作區。伺服器啟動期間，您仍可切換語言。',connectionFailed:'伺服器暫時無法連線。請重新連線；表單內容仍保留。',signingIn:'登入中…',storageHelp:'已儲存的評估紀錄可供團隊共用。',recordId:'紀錄編號',selectRecord:'選取紀錄',unnamed:'未填寫姓名',functionalTitle:'功能性診斷分類',diagnosisTitle:'診斷分類',managementTitle:'處置與介入'});
+Object.assign(tr.en,{skippedDuplicates:' · {n} duplicates skipped',retry:'Reconnect',connecting:'',connectionFailed:'The server is temporarily unavailable. Please reconnect; your form has not been cleared.',signingIn:'Signing in…',storageHelp:'Saved evaluations are shared with your team.',recordId:'Record ID',selectRecord:'Select record',unnamed:'Unnamed patient',functionalTitle:'Functional classification',diagnosisTitle:'Diagnosis',managementTitle:'Management & interventions'});
+Object.assign(tr['zh-TW'],{skippedDuplicates:' · 略過 {n} 筆重複資料',retry:'重新連線',connecting:'',connectionFailed:'伺服器暫時無法連線。請重新連線；表單內容仍保留。',signingIn:'登入中…',storageHelp:'已儲存的評估紀錄可供團隊共用。',recordId:'紀錄編號',selectRecord:'選取紀錄',unnamed:'未填寫姓名',functionalTitle:'功能性診斷分類',diagnosisTitle:'診斷分類',managementTitle:'處置與介入'});
 $('#retryConnection').onclick=async()=>{await wakeBackend();if(token)await restoreLogin()};
 translate();wakeBackend();
 
@@ -211,10 +209,11 @@ translate();
 
 function renderCasePicker(){
  const query=$('#search').value.toLowerCase();
- const values=[...new Set(sortedRecordRows(cachedRecords,query,$('#importDate').value,false).filter(row=>!row.pendingImport).map(row=>String(row.caseId||'')).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+ const values=[...new Set(sortedRecordRows(cachedRecords,query,$('#importDate').value,false).filter(row=>!row.pendingImport).map(row=>String(row.caseId||'')).filter(Boolean))].sort((a,b)=>caseSuggestionRank(a,query)-caseSuggestionRank(b,query)||a.localeCompare(b,undefined,{numeric:true}));
  $('#casePickerText').textContent=caseIdFilters.size?t('caseFilterCount').replace('{n}',caseIdFilters.size):query?t('matchingCaseIds').replace('{query}',$('#search').value):t('allCaseIds');
+ $('#caseSuggestionsHeading').textContent=t(query?'caseSuggestions':'caseList');
  $('#casePickerCount').textContent=t('caseOptionsCount').replace('{shown}',Math.min(caseIdLimit,values.length)).replace('{total}',values.length);
- $('#casePickerOptions').innerHTML=values.slice(0,caseIdLimit).map(value=>`<label class="case-picker-option"><input type="checkbox" value="${esc(value)}" ${caseIdFilters.has(value)?'checked':''}><span>${esc(value)}</span></label>`).join('')||`<p class="muted">${esc(t('noMatches'))}</p>`;
+ $('#casePickerOptions').innerHTML=values.slice(0,caseIdLimit).map(value=>`<label class="case-picker-option"><input type="checkbox" value="${esc(value)}" ${caseIdFilters.has(value)?'checked':''}><span>${highlightCaseId(value,query)}</span></label>`).join('')||`<p class="muted">${esc(t('noMatches'))}</p>`;
  $('#casePickerOptions').querySelectorAll('input').forEach(box=>box.onchange=()=>{if(box.checked)caseIdFilters.add(box.value);else caseIdFilters.delete(box.value);recordsPage=1;const value=box.value;drawRows(cachedRecords);$('#casePickerOptions').querySelectorAll('input').forEach(input=>{if(input.value===value)input.focus({preventScroll:true})})});
  $('#moreCaseOptions').hidden=values.length<=caseIdLimit;
  $('#clearCaseFilter').disabled=!caseIdFilters.size&&!query;
@@ -228,4 +227,13 @@ $('#caseIdPicker').addEventListener('keydown',event=>{if(event.key==='Escape'){e
 const queryInputHandler=$('#search').oninput;$('#search').oninput=()=>{caseIdLimit=100;queryInputHandler()};
 Object.assign(tr.en,{findCases:'Filter Case IDs',matchingCaseIds:'Matching: {query}',allCaseIds:'All Case IDs',caseFilterCount:'{n} Case IDs selected',searchCaseOptions:'Search Case IDs',search:'Search Case IDs…',clearCaseFilter:'Reset filter',moreCaseOptions:'Show more',applyCaseFilter:'Done',caseOptionsCount:'Showing {shown} of {total} IDs',searchHelp:'Open the list and check Case IDs. Use Select results to include the filtered records in your download.'});
 Object.assign(tr['zh-TW'],{findCases:'篩選個案編號',matchingCaseIds:'搜尋：{query}',allCaseIds:'全部個案編號',caseFilterCount:'已篩選 {n} 個編號',searchCaseOptions:'搜尋個案編號',search:'搜尋個案編號…',clearCaseFilter:'重設篩選',moreCaseOptions:'顯示更多',applyCaseFilter:'完成',caseOptionsCount:'顯示 {shown} / {total} 個編號',searchHelp:'展開清單並勾選個案編號，再按「選取結果」加入下載清單。'});
-const translateWithPicker=translate;translate=function(){translateWithPicker();renderCasePicker()};translate();
+const translateWithPicker=translate;translate=function(){translateWithPicker();renderCasePicker();$('#selectAll').title=t('selectAllHelp')};translate();
+
+function caseSuggestionRank(value,query){const id=value.toLocaleLowerCase(),q=query.trim();return id===q?0:id.startsWith(q)?1:2}
+function highlightCaseId(value,query){const q=query.trim(),index=value.toLocaleLowerCase().indexOf(q);if(!q||index<0)return esc(value);return `${esc(value.slice(0,index))}<mark>${esc(value.slice(index,index+q.length))}</mark>${esc(value.slice(index+q.length))}`}
+$('#search').addEventListener('keydown',event=>{if(event.key==='ArrowDown'){const first=$('#casePickerOptions input');if(first){event.preventDefault();first.focus()}}});
+$('#casePickerOptions').addEventListener('keydown',event=>{const options=[...$('#casePickerOptions').querySelectorAll('input')],index=options.indexOf(event.target);if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();const next=index+(event.key==='ArrowDown'?1:-1);if(next<0)$('#search').focus();else options[Math.min(next,options.length-1)]?.focus()}});
+$('#clearDateFilter').onclick=()=>{$('#importDate').value='';recordsPage=1;drawRows(cachedRecords)};
+Object.assign(tr.en,{selectAll:'Select all',selectAllHelp:'Select all matching saved records across pages',caseList:'Case ID list',caseSuggestions:'Suggested Case IDs',resetDate:'Reset date',searchHelp:'Check Case IDs from the list, or type to see suggestions. Select all includes every matching record across pages.'});
+Object.assign(tr['zh-TW'],{selectAll:'全選',selectAllHelp:'選取所有頁面中符合條件的已儲存紀錄',caseList:'個案編號清單',caseSuggestions:'建議的個案編號',resetDate:'清除日期',searchHelp:'可從清單勾選個案編號，或輸入關鍵字查看建議。「全選」包含所有頁面中符合條件的紀錄。'});
+$('#selectAll').title=t('selectAllHelp');translate();
