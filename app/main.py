@@ -14,7 +14,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
 from openpyxl.utils import get_column_letter
-from openpyxl.formatting.rule import CellIsRule
+from openpyxl.formatting.rule import FormulaRule
+from openpyxl.comments import Comment
 from openpyxl.worksheet.cell_range import MultiCellRange, CellRange
 from pydantic import BaseModel, Field
 from app.classifier import classify_text
@@ -685,7 +686,7 @@ def record_export_rows(rows: list[dict[str, Any]]) -> list[list[str]]:
 
 
 EXPORT_LABELS = json.loads((ROOT / "export_labels.json").read_text(encoding="utf-8"))
-EXPORT_HEADINGS = {'CASE ID': '個案編號', 'Patient Name': '病患姓名', 'Chart No': '病歷號碼', 'Exam Date': '檢查日期', 'Physician': '醫師', 'Diagnosis Groups': '診斷分類', 'Checklist': '檢核表', 'REHABILITATION CHECKLIST': '小兒復健科檢核表', 'One section per evaluation · Matches the three sections of the hospital checklist': '每筆評估獨立呈現 · 依醫院檢核表三大部分編排', 'Record ID': '紀錄編號', 'Case ID': '個案編號', 'I. FUNCTIONAL CLASSIFICATION': '一、功能性診斷分類', 'II. DIAGNOSIS': '二、診斷分類', 'Diagnosis notes': '診斷補充說明', 'III. MANAGEMENT & INTERVENTIONS': '三、處置與介入', 'Medication / notes': '藥物／備註', 'View checklist →': '檢視檢核表 →', 'Back to case list ↑': '返回個案清單 ↑', 'Functional Classifications': '功能性診斷分類', 'Diagnostic Items': '診斷項目', 'Treatment Plan': '處置計畫', 'Medication': '藥物／備註', 'No saved evaluations to export.': '沒有可匯出的已儲存評估紀錄。', 'Unnamed patient': '未填寫姓名'}
+EXPORT_HEADINGS = {'Checklist selection': '檢核表選取狀態', 'Unmapped checklist items': '未對應的檢核項目', 'Check unmapped items': '請核對未對應項目', 'Selected': '已選取', 'No checklist diagnosis selected': '尚未選取檢核診斷', 'CASE ID': '個案編號', 'Patient Name': '病患姓名', 'Chart No': '病歷號碼', 'Exam Date': '檢查日期', 'Physician': '醫師', 'Diagnosis Groups': '診斷分類', 'Checklist': '檢核表', 'REHABILITATION CHECKLIST': '小兒復健科檢核表', 'One section per evaluation · Matches the three sections of the hospital checklist': '每筆評估獨立呈現 · 依醫院檢核表三大部分編排', 'Record ID': '紀錄編號', 'Case ID': '個案編號', 'I. FUNCTIONAL CLASSIFICATION': '一、功能性診斷分類', 'II. DIAGNOSIS': '二、診斷分類', 'Diagnosis notes': '診斷補充說明', 'III. MANAGEMENT & INTERVENTIONS': '三、處置與介入', 'Medication / notes': '藥物／備註', 'View checklist →': '檢視檢核表 →', 'Back to case list ↑': '返回個案清單 ↑', 'Functional Classifications': '功能性診斷分類', 'Diagnostic Items': '診斷項目', 'Treatment Plan': '處置計畫', 'Medication': '藥物／備註', 'No saved evaluations to export.': '沒有可匯出的已儲存評估紀錄。', 'Unnamed patient': '未填寫姓名'}
 
 
 def export_heading(value: str, lang: str) -> str:
@@ -693,6 +694,35 @@ def export_heading(value: str, lang: str) -> str:
         return value
     translated = EXPORT_HEADINGS.get(value)
     return f"{translated}\n{value}" if translated else value
+
+
+def matrix_diagnoses(record: dict[str, Any], lang: str) -> tuple[dict[str, list[str]], list[str]]:
+    """Group only selected checklist items; never infer diagnoses from source notes."""
+    catalog = EXPORT_LABELS["english"]
+    canonical = [key for key in catalog if key.startswith("diag-")]
+    label_codes = {label.strip().casefold(): key for key in canonical
+                   for label in [catalog[key], EXPORT_LABELS["values"].get(key, "")]
+                   if label}
+    selected = record.get("diagnoses") or record.get("diagnosisLabels") or []
+    selected_codes = set()
+    unmapped = []
+    for value in selected:
+        value = str(value).strip()
+        if not value:
+            continue
+        code = value if value in canonical else label_codes.get(value.casefold())
+        if code:
+            selected_codes.add(code)
+        elif value not in unmapped:
+            unmapped.append(value)
+    grouped = {code: [] for code in DIAGNOSIS_GROUPS}
+    for code in canonical:
+        if code not in selected_codes:
+            continue
+        group = code.split("-", 2)[1]
+        label = EXPORT_LABELS["values"].get(code, catalog[code]) if lang == "zh-TW" else catalog[code].split(": ", 1)[-1]
+        grouped[group].append(label)
+    return grouped, unmapped
 
 
 def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Workbook:
@@ -720,7 +750,9 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
     detail_merges.append(CellRange("A2:D2"))
     append_detail(["", "", "", ""])
     matrix = wb.create_sheet("Diagnosis matrix")
-    matrix.append(["CASE ID", heading("Record ID"), *[f"{code} — {EXPORT_LABELS['groups'][code]}\n{name}" if lang == "zh-TW" else f"{code} — {name}" for code, name in DIAGNOSIS_GROUPS.items()]])
+    matrix.append(["CASE ID", heading("Checklist selection"), *[f"{code} — {EXPORT_LABELS['groups'][code]}\n{name}" if lang == "zh-TW" else f"{code} — {name}" for code, name in DIAGNOSIS_GROUPS.items()], heading("Unmapped checklist items")])
+    used_matrix_groups = set()
+    has_unmapped_items = False
 
     def text(value: Any) -> str:
         return str(value or "")
@@ -782,8 +814,13 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
         details.cell(detail_row, 1).hyperlink = f"#'Case overview'!A{index + 1}"
         details.cell(detail_row, 1).font = Font(name="Calibri", color="167568", underline="single")
         append_detail(["", "", "", ""])
-        selected_groups = set(diagnosis_group_codes(record))
-        matrix.append([case_id, text(record.get("id")), *[int(code in selected_groups) for code in DIAGNOSIS_GROUPS]])
+        grouped, unmapped = matrix_diagnoses(record, lang)
+        used_matrix_groups.update(code for code, values in grouped.items() if values)
+        has_unmapped_items = has_unmapped_items or bool(unmapped)
+        selection_status = "Check unmapped items" if unmapped else "Selected" if any(grouped.values()) else "No checklist diagnosis selected"
+        matrix.append([case_id, heading(selection_status), *["\n".join(grouped[code]) for code in DIAGNOSIS_GROUPS], "\n".join(unmapped)])
+        matrix.cell(index + 1, 1).hyperlink = f"#'Checklist details'!A{start}"
+        matrix.cell(index + 1, 1).font = Font(name="Calibri", color="167568", underline="single")
         for column in range(1, 5):
             cell = details.cell(start, column)
             cell.fill = PatternFill("solid", fgColor="167568")
@@ -797,7 +834,7 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
     if not rows:
         append_detail([heading("No saved evaluations to export.")])
 
-    for ws, widths in [(overview, [28, 64, 26]), (details, [34, 36, 20, 32]), (matrix, [28, 24] + [22] * len(DIAGNOSIS_GROUPS))]:
+    for ws, widths in [(overview, [28, 64, 26]), (details, [34, 36, 20, 32]), (matrix, [22, 28] + [36] * len(DIAGNOSIS_GROUPS) + [36])]:
         ws.sheet_view.showGridLines = False
         ws.sheet_properties.pageSetUpPr.fitToPage = True
         ws.sheet_properties.outlinePr.summaryRight = False
@@ -833,8 +870,23 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
                 ws.add_table(table)
             for row in ws.iter_rows(min_row=2):
                 ws.row_dimensions[row[0].row].height = max(36, min(160, 16 * max((len(str(cell.value or "")) // widths[cell.column-1] + 1) for cell in row) + 12))
+    matrix.freeze_panes = "C2"
+    matrix.sheet_view.zoomScale = 85
+    matrix.print_options.horizontalCentered = False
+    matrix.print_title_cols = "A:B"
+    for column, code in enumerate(DIAGNOSIS_GROUPS, start=3):
+        matrix.column_dimensions[get_column_letter(column)].hidden = bool(rows) and code not in used_matrix_groups
+    matrix.column_dimensions["S"].hidden = not has_unmapped_items
+    legend = ("每列為一筆已儲存紀錄；依檢核表分類顯示已選診斷。空白表示未選取，並非排除疾病。未使用的分類已隱藏，可在 Excel 中取消隱藏。點選個案編號可檢視完整檢核表。\n"
+              if lang == "zh-TW" else "") + "One saved record per row. Cells list selected checklist diagnoses in their category. Blank means not selected, not that disease is excluded. Unused categories are hidden; unhide columns to see all 16. Click a Case ID for its checklist."
+    matrix["A1"].comment = Comment(legend, "Rehab Checklist")
+    matrix["B1"].comment = Comment(legend, "Rehab Checklist")
     if rows:
-        matrix.conditional_formatting.add(f"C2:R{matrix.max_row}", CellIsRule(operator="equal", formula=["1"], fill=PatternFill("solid", fgColor="DDEFE2"), font=Font(color="145B3C", bold=True)))
+        matrix.conditional_formatting.add(f"C2:S{matrix.max_row}", FormulaRule(formula=['LEN(C2)>0'], fill=PatternFill("solid", fgColor="DDEFE2"), font=Font(color="145B3C", bold=True)))
+        for row in matrix.iter_rows(min_row=2):
+            # Honor explicit line breaks when a case has several diagnoses.
+            lines = max(sum(max(1, (sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in segment) + 31) // 32) for segment in str(cell.value or "").split("\n")) for cell in row)
+            matrix.row_dimensions[row[0].row].height = min(400, max(36, lines * 16 + 12))
     return wb
 
 
