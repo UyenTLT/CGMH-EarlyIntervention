@@ -314,7 +314,13 @@ with tempfile.TemporaryDirectory() as temp:
                 locator.evaluate('(el)=>el.closest("details").open=true')
                 if value=='diag-01-epilepsy': locator.uncheck()
                 else: locator.check()
+            assert '(1)' in page.locator('#discardImportDuplicates').inner_text()
             page.once('dialog',lambda dialog:dialog.accept());page.locator('#discardImportDuplicates').click()
+            assert page.locator('#importReviewRows tr').count()==2
+            assert '(0)' in page.locator('#discardImportDuplicates').inner_text()
+            page.locator('#discardImportDuplicates').click()
+            assert '0 identical duplicates' in page.locator('#importReviewMessage').inner_text()
+            assert page.locator('#importReviewMessage').is_visible()
             assert page.locator('#importReviewRows tr').count()==2
             diseases=page.locator('#importReviewRows .review-disease-cell').all_inner_texts()
             assert any('Autism' in value for value in diseases) and any('Epilepsy' in value for value in diseases)
