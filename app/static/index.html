@@ -27,7 +27,7 @@
     <p id="queryHelp" class="muted query-help" data-i="searchHelp">Enter one Case ID or separate multiple IDs with commas.</p>
     <div class="records-actions">
       <div class="selection-summary"><button id="selectAll" type="button" class="quiet" data-i="selectAll">Select all</button><span id="selectionStatus" role="status" data-i="selectExportHint">No cases selected</span><button id="clearSelection" type="button" class="selection-link" data-i="clearSelection">Clear</button><button id="deleteSelected" type="button" class="quiet delete-selected" data-i="deleteSelected" hidden>Delete selected</button></div>
-      <div class="download-controls"><label for="exportFormat" data-i="format">Output</label><select id="exportFormat"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV (.csv)</option><option value="txt">Text (.txt)</option><option value="docx">Word (.docx)</option><option value="pdf">PDF (.pdf)</option></select><button id="export" class="primary"><span aria-hidden="true">↓</span> <span data-i="export">Download</span></button></div>
+      <div class="download-controls"><label for="exportFormat" data-i="format">Output</label><select id="exportFormat"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV (.csv)</option><option value="txt">Text (.txt)</option><option value="docx">Word (.docx)</option><option value="pdf">PDF (.pdf)</option></select><button id="export" type="button" class="primary"><span aria-hidden="true">↓</span> <span data-i="export">Download</span></button></div>
     </div>
     <div id="selectedCases" class="selected-cases" role="group" aria-label="Selected Case IDs"></div>
     <p id="importStatus" class="import-status" role="status"></p>

@@ -34,6 +34,13 @@ with tempfile.TemporaryDirectory() as temp:
     try:
         wait_ready(API + '/api/health')
         wait_ready(WEB)
+        unauthenticated = Request(API+'/api/export', data=b'{"ids":["synthetic-not-saved"],"format":"xlsx"}', headers={'Content-Type':'application/json'})
+        from urllib.error import HTTPError
+        try:
+            urlopen(unauthenticated)
+            raise AssertionError('Export must require authentication')
+        except HTTPError as error:
+            assert error.code == 401
         preflight = Request(API + '/api/login', method='OPTIONS', headers={'Origin': WEB, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type'})
         with urlopen(preflight) as response:
             assert response.headers['Access-Control-Allow-Origin'] == WEB
@@ -152,6 +159,15 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#applyCaseFilter').click()
             assert page.locator('#recordRows tr').count()==2
             page.locator('#clearSelection').click()
+            assert page.locator('#export').is_enabled()
+            page.locator('#exportFormat').select_option('csv')
+            with page.expect_download() as result:
+                page.locator('#export').click()
+            export_path=Path(temp)/'unselected.csv'
+            result.value.save_as(export_path)
+            content=export_path.read_text(encoding='utf-8-sig')
+            assert 'STATIC-001' in content and 'LEGACY-002' in content
+            filter_text('NO-SUCH-CASE')
             assert page.locator('#export').is_disabled()
             filter_text('STATIC-001, LEGACY-002')
             assert page.locator('#recordRows tr').count()==2
@@ -168,6 +184,18 @@ with tempfile.TemporaryDirectory() as temp:
                 content=export_path.read_text(encoding='utf-8-sig')
                 assert 'STATIC-001' in content and 'LEGACY-002' in content
                 assert 'REMOVED-NAME' not in content
+            for fmt,signature in [('docx',b'PK'),('pdf',b'%PDF')]:
+                page.locator('#exportFormat').select_option(fmt)
+                with page.expect_download() as result:
+                    page.locator('#export').click()
+                export_path=Path(temp)/('cases.'+fmt)
+                result.value.save_as(export_path)
+                assert export_path.read_bytes().startswith(signature)
+            page.route(API+'/api/export',lambda route:route.fulfill(status=500,json={'detail':'synthetic failure'}))
+            page.locator('#export').click()
+            page.wait_for_function('document.querySelector("#selectionStatus").textContent.includes("500")')
+            assert page.locator('#export').is_enabled()
+            page.unroute(API+'/api/export')
             page.locator('#selectedCases [data-unselect="'+legacy['id']+'"]').click()
             assert page.locator('#selectedCases button').count()==1
             page.locator('#exportFormat').select_option('xlsx')
@@ -329,11 +357,24 @@ with tempfile.TemporaryDirectory() as temp:
             # Large libraries show 100 options at a time without requiring typing.
             import json
             library=[{'id':f'scale-{i}','caseId':f'SCALE-{i:04d}','diagnoses':[]} for i in range(2232)]
+            assert page.request.post(API+'/api/records/bulk',headers=auth,data=library).ok
             page.route(API+'/api/records',lambda route:route.fulfill(json=library))
             page.reload();page.locator('#dashboard').wait_for(state='visible');page.locator('[data-tab=records]').click()
             page.locator('#selectAll').click()
             assert page.locator('#selectedCases button').count()==2232
             assert page.locator('#deleteSelected').is_visible()
+            page.locator('#exportFormat').select_option('xlsx')
+            with page.expect_request(API+'/api/export') as request, page.expect_download(timeout=60000) as result:
+                page.locator('#export').click()
+            assert request.value.method=='POST'
+            assert len(request.value.post_data_json['ids'])==2232
+            export_path=Path(temp)/'large-export.xlsx'
+            result.value.save_as(export_path)
+            workbook=load_workbook(export_path,read_only=True)
+            assert workbook['Case overview'].max_row==2233
+            assert workbook['Case overview']['A2'].value=='SCALE-0000'
+            workbook.close()
+            print('PASS: all five download formats, filtered download without selection, HTTP errors, 2232-case XLSX via POST')
             page.locator('#clearSelection').click()
             assert page.locator('#deleteSelected').is_hidden()
             page.locator('#caseIdPicker summary').click()
@@ -349,6 +390,10 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('#casePickerOptions input').check()
             page.locator('#applyCaseFilter').click()
             assert page.locator('#recordRows tr').count()==1
+            page.route(API+'/api/export',lambda route:route.fulfill(status=401,json={'detail':'expired test session'}))
+            page.locator('#export').click()
+            page.locator('#login').wait_for(state='visible')
+            assert page.locator('#loginError').inner_text()
             assert not errors, errors
             browser.close()
         print('PASS: static UI while API is pending/offline; login language; retry; duplicate-submit protection; cross-origin login/CRUD; bilingual search and XLSX; desktop widths; reload persistence')

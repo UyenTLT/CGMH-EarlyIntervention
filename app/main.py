@@ -3,7 +3,7 @@ from __future__ import annotations
 import io, json, secrets, hashlib, hmac, re, os, csv, threading, time, unicodedata
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from xml.sax.saxutils import escape
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
@@ -15,6 +15,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
 from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import CellIsRule
+from openpyxl.worksheet.cell_range import MultiCellRange, CellRange
 from pydantic import BaseModel, Field
 from app.classifier import classify_text
 
@@ -69,6 +70,12 @@ class PasswordReset(BaseModel):
 
 class DeleteRecordsRequest(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=5000)
+
+
+class ExportRecordsRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=5000)
+    format: Literal["xlsx", "csv", "txt", "docx", "pdf"] = "xlsx"
+    lang: Literal["en", "zh-TW"] = "en"
 
 
 class ClassifyRequest(BaseModel):
@@ -697,11 +704,21 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
     overview.title = "Case overview"
     overview.append(["CASE ID", *[heading(value) for value in ["Diagnosis Groups", "Checklist"]]])
     details = wb.create_sheet("Checklist details")
-    details.append([heading("REHABILITATION CHECKLIST"), "", "", ""])
-    details.merge_cells("A1:D1")
-    details.append([heading("One section per evaluation · Matches the three sections of the hospital checklist"), "", "", ""])
-    details.merge_cells("A2:D2")
-    details.append(["", "", "", ""])
+    # These ranges are disjoint by construction. Register them together after
+    # writing cells, avoiding quadratic overlap checks for thousands of cases.
+    detail_merges = []
+    detail_row = 0
+
+    def append_detail(values):
+        nonlocal detail_row
+        details.append(values)
+        detail_row += 1
+
+    append_detail([heading("REHABILITATION CHECKLIST"), "", "", ""])
+    detail_merges.append(CellRange("A1:D1"))
+    append_detail([heading("One section per evaluation · Matches the three sections of the hospital checklist"), "", "", ""])
+    detail_merges.append(CellRange("A2:D2"))
+    append_detail(["", "", "", ""])
     matrix = wb.create_sheet("Diagnosis matrix")
     matrix.append(["CASE ID", heading("Record ID"), *[f"{code} — {EXPORT_LABELS['groups'][code]}\n{name}" if lang == "zh-TW" else f"{code} — {name}" for code, name in DIAGNOSIS_GROUPS.items()]])
 
@@ -712,16 +729,16 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
         return "\n".join(EXPORT_LABELS["values"].get(str(value), str(value)) if lang == "zh-TW" else EXPORT_LABELS["english"].get(str(value), str(value)) for value in values or [])
 
     for index, record in enumerate(rows, start=1):
-        start = details.max_row + 1
+        start = detail_row + 1
         case_id = text(record.get("caseId"))
         overview.append([case_id, ("; ".join(f"{code} — {EXPORT_LABELS['groups'][code]}" for code in diagnosis_group_codes(record)) or "未分類") if lang == "zh-TW" else primary_diagnosis_group(record), heading("View checklist →")])
         link = overview.cell(index + 1, 3)
         link.hyperlink = f"#'Checklist details'!A{start}"
         link.font = Font(name="Calibri", color="167568", underline="single")
-        details.append([f"{index:02d} · {case_id or 'Case ID missing'}", "", "", ""])
-        details.merge_cells(start_row=start, start_column=1, end_row=start, end_column=4)
-        details.append([heading("Case ID"), case_id, "", ""])
-        details.merge_cells(start_row=start + 1, start_column=2, end_row=start + 1, end_column=4)
+        append_detail([f"{index:02d} · {case_id or 'Case ID missing'}", "", "", ""])
+        detail_merges.append(CellRange(min_row=start, min_col=1, max_row=start, max_col=4))
+        append_detail([heading("Case ID"), case_id, "", ""])
+        detail_merges.append(CellRange(min_row=start + 1, min_col=2, max_row=start + 1, max_col=4))
         diagnosis_items = record.get("diagnosisLabels") or record.get("diagnoses", [])
         sections = [
             ("I. FUNCTIONAL CLASSIFICATION", listed(record.get("functional", [])) + ("\n" + record["functionalNotes"] if record.get("functionalNotes") else "")),
@@ -754,29 +771,31 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
                 caption = heading(label)
                 if part:
                     caption += "\n（續）" if lang == "zh-TW" else " (continued)"
-                details.append([caption, chunk, "", ""])
-                line = details.max_row
-                details.merge_cells(start_row=line, start_column=2, end_row=line, end_column=4)
+                append_detail([caption, chunk, "", ""])
+                line = detail_row
+                detail_merges.append(CellRange(min_row=line, min_col=2, max_row=line, max_col=4))
                 details.cell(line, 1).font = Font(name="Calibri", bold=True, color="38594E", size=11)
                 details.cell(line, 1).fill = PatternFill("solid", fgColor="EFF6F2")
                 visual_lines = sum(max(1, (sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in segment) + 75) // 76) for segment in (chunk or "—").split("\n"))
                 details.row_dimensions[line].height = min(400, max(52 if lang == "zh-TW" else 32, visual_lines * 16 + 12))
-        details.append([heading("Back to case list ↑"), "", "", ""])
-        details.cell(details.max_row, 1).hyperlink = f"#'Case overview'!A{index + 1}"
-        details.cell(details.max_row, 1).font = Font(name="Calibri", color="167568", underline="single")
-        details.append(["", "", "", ""])
+        append_detail([heading("Back to case list ↑"), "", "", ""])
+        details.cell(detail_row, 1).hyperlink = f"#'Case overview'!A{index + 1}"
+        details.cell(detail_row, 1).font = Font(name="Calibri", color="167568", underline="single")
+        append_detail(["", "", "", ""])
         selected_groups = set(diagnosis_group_codes(record))
         matrix.append([case_id, text(record.get("id")), *[int(code in selected_groups) for code in DIAGNOSIS_GROUPS]])
-        for cell in details[start]:
+        for column in range(1, 5):
+            cell = details.cell(start, column)
             cell.fill = PatternFill("solid", fgColor="167568")
             cell.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
         details.row_dimensions[start].height = 36
         details.row_dimensions[start + 1].height = 40 if lang == "zh-TW" else 30
         details.row_dimensions[start + 2].height = 40 if lang == "zh-TW" else 30
 
+    details.merged_cells = MultiCellRange(detail_merges)
     details.row_dimensions[2].height = 42 if lang == "zh-TW" else 30
     if not rows:
-        details.append([heading("No saved evaluations to export.")])
+        append_detail([heading("No saved evaluations to export.")])
 
     for ws, widths in [(overview, [28, 64, 26]), (details, [34, 36, 20, 32]), (matrix, [28, 24] + [22] * len(DIAGNOSIS_GROUPS))]:
         ws.sheet_view.showGridLines = False
@@ -893,3 +912,9 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[]), lang: str =
     wb = build_checklist_workbook(rows, lang)
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="hospital_checklist.xlsx"'})
+
+
+@app.post("/api/export", dependencies=[Depends(auth)])
+def export_selected(body: ExportRecordsRequest):
+    # Keep large selections in the body rather than a browser/proxy URL.
+    return export(format=body.format, ids=body.ids, lang=body.lang)

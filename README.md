@@ -45,7 +45,8 @@ When `DATABASE_URL` is set (the Render deployment), the app stores both accounts
 | POST | `/api/import-cases` | Import `.xlsx`, `.csv`, and `.txt` case data; tabular files need a `CASE ID` header, and labeled TXT blocks can use `Case ID:` / `Diagnosis:`; each case is a separate preview record, and repeat imports skip known case IDs |
 | DELETE | `/api/records/{id}` | Delete a record |
 | POST | `/api/extract` | Extract text from an uploaded document for clinician review |
-| GET | `/api/export?format=xlsx&ids=...` | Download selected records (or all when no IDs are supplied) as `.xlsx`, `.docx`, or `.pdf`; repeat `ids` for multiple records |
+| POST | `/api/export` | Download selected saved records as XLSX, CSV, TXT, DOCX, or PDF. JSON body: `ids` (1–5000 record IDs), `format`, and `lang` (`en` or `zh-TW`) |
+| GET | `/api/export?format=xlsx&ids=...` | Compatibility endpoint; repeat `ids` for selected records, or omit IDs for all saved records |
 
 ## Scope and clinical use
 
@@ -102,7 +103,7 @@ Case ID is required in the editor and is the only field used for record search. 
 
 Overview & new record opens after login and shows the activity summary and inline checklist editor together. Records remains a separate page for querying, selecting, importing, and downloading cases. New record stays in Overview; Edit in Records navigates to that inline editor. There is no separate New record tab or editor dialog. Switching pages preserves the current browser-session draft.
 
-Search one Case ID by partial match, or paste comma/semicolon/newline-separated IDs for exact multi-ID matching. **Select results** adds all matching saved cases across pages; preview imports cannot be selected. Individual checkboxes, removable Case ID chips, and **Clear selection** control the output set. Download only sends explicitly selected record IDs. Available formats are XLSX, CSV (UTF-8 BOM, spreadsheet formula escaping), UTF-8 TXT, DOCX, and PDF. The authenticated API also retains its existing empty-IDs behavior for compatibility; the UI never downloads an empty selection.
+Search one Case ID by partial match, or paste comma/semicolon/newline-separated IDs for exact multi-ID matching. **Select results** adds all matching saved cases across pages; preview imports cannot be selected. Individual checkboxes, removable Case ID chips, and **Clear selection** control the output set. Download sends explicitly selected record IDs, or all saved records matching the active filters when nothing is checked. The selection summary states this scope. Unsaved import previews are excluded. Available formats are XLSX, CSV (UTF-8 BOM, spreadsheet formula escaping), UTF-8 TXT, DOCX, and PDF. The UI posts IDs in a JSON body, shows preparation and download feedback, and asks for sign-in if the session has expired. Excel details register their disjoint merged ranges together to avoid repeated overlap checks during large exports.
 
 
 The Records layout uses a compact heading with one Import button, a full-width Case ID query row, and a separate selection/download row above the table. Import date is an inline toolbar control with Reset date. Delete selected appears directly beside selection actions when records are selected. Native file-input chrome is visually hidden while the labelled upload remains keyboard accessible. Static builds add content hashes to asset URLs, and the Python-hosted HTML/CSS/JS routes require cache revalidation so styles and markup stay in sync after updates.
