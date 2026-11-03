@@ -565,7 +565,7 @@ async def import_cases(file: UploadFile = File(...), mapping: str | None = Form(
         if options is not None and not isinstance(options, dict):
             raise ValueError('Invalid column mapping')
         result = preview_import(datasets, read_records(), file.filename or name, options)
-        if not result['records']:
+        if not result['records'] and not result.get('duplicatesRemoved'):
             raise ValueError('No cases found below the selected header row')
         return result
     except (ValueError, TypeError) as exc:

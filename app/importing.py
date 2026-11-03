@@ -39,6 +39,28 @@ def canonical_items(text, group):
     return selected, '\n'.join(notes)
 
 
+def remove_identical_duplicates(records, existing):
+    """Retain conflicting clinical content; remove only identical identified cases."""
+    fields = ['diagnosisNotes', 'functional', 'functionalNotes', 'management', 'managementNotes', 'medication', 'diagnoses']
+    def fingerprint(row):
+        values = {}
+        for field in fields:
+            value = row.get(field, [] if field in {'functional', 'management', 'diagnoses'} else '')
+            values[field] = sorted(value or []) if isinstance(value, list) else str(value or '').strip()
+        return (str(row.get('caseId') or '').strip().casefold(), json.dumps(values, sort_keys=True, ensure_ascii=False))
+    seen = {fingerprint(row) for row in existing if str(row.get('caseId') or '').strip()}
+    kept, removed = [], 0
+    for row in records:
+        key = fingerprint(row)
+        if key[0] and key in seen:
+            removed += 1
+            continue
+        if key[0]:
+            seen.add(key)
+        kept.append(row)
+    return kept, removed
+
+
 def preview_import(datasets, existing, filename, mapping=None):
     known = {str(row.get('caseId') or '').strip().casefold() for row in existing}
     seen, records, found, ignored = set(), [], False, []
@@ -124,7 +146,8 @@ def preview_import(datasets, existing, filename, mapping=None):
                 })
     if not found:
         raise ValueError('No table with a CASE ID column was found')
-    return {'records': records, 'imported': len(records), 'skipped': 0,
+    records, removed = remove_identical_duplicates(records, existing)
+    return {'records': records, 'imported': len(records), 'skipped': removed, 'duplicatesRemoved': removed,
             'suggested': sum(bool(row['diagnoses']) for row in records),
             'needsReview': len(records), 'ignoredSheets': ignored,
             'duplicates': sum(any(issue in row['importMeta']['issues'] for issue in ['existing_case_id', 'duplicate_in_file']) for row in records)}

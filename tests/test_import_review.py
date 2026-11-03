@@ -50,3 +50,20 @@ class ExcelUploadTests(unittest.TestCase):
             result=asyncio.run(import_cases(UploadFile(filename='example.xlsx',file=io.BytesIO(raw)),mapping=json.dumps({'sheet':'Source','headerRow':1,'columns':{'caseId':0,'diagnosisNotes':1}})))
         self.assertEqual(result['records'][0]['caseId'],'0012')
         self.assertEqual(result['records'][0]['diagnosisNotes'],'Autism')
+
+
+class DuplicateImportTests(unittest.TestCase):
+    def test_identical_rows_removed_but_conflicts_retained(self):
+        rows=[('Case ID','Diagnosis'),('A','Autism'),('A','Autism'),('A','Epilepsy')]
+        result=preview_import([('S',rows)],[],'file.csv')
+        self.assertEqual(result['duplicatesRemoved'],1)
+        self.assertEqual(len(result['records']),2)
+        self.assertEqual([r['diagnosisNotes'] for r in result['records']],['Autism','Epilepsy'])
+
+    def test_existing_identical_row_is_skipped_without_mutation(self):
+        first=preview_import([('S',[('CASE ID','Diagnosis'),('A','Autism')])],[],'file.csv')['records'][0]
+        existing=dict(first)
+        result=preview_import([('S',[('CASE ID','Diagnosis'),('A','Autism')])],[existing],'file.csv')
+        self.assertEqual(result['records'],[])
+        self.assertEqual(result['duplicatesRemoved'],1)
+        self.assertEqual(existing,first)

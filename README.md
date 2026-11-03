@@ -121,3 +121,6 @@ Review shows the source file/sheet/row, extracted diagnosis, missing/duplicate I
 
 
 Excel review opens the first case automatically. Each case has its own checkbox checklist, source sheet/ID heading, and Previous/Next navigation; navigation retains edits as unapproved drafts. XLSX zero-padded numeric IDs are preserved; legacy XLS is supported. Unknown headers open a column-mapping dialog for sheet/header/clinical columns instead of failing without a recovery path. If two sheets reuse the same IDs, the reviewer can explicitly choose Separate IDs by sheet (with confirmation), preserving the original ID in source metadata. This changes only the unsaved import and requires approval again.
+
+
+Imports automatically skip rows with the same Case ID and identical extracted clinical fields, including identical already-saved cases. Rows with the same ID but different clinical content remain in review. This never deletes stored records. The review header reports the number skipped.
