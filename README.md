@@ -127,3 +127,6 @@ Imports automatically skip rows with the same Case ID and identical extracted cl
 
 
 Import-review checkboxes allow selecting unreviewed and ID-conflicting rows, including all rows on a review page. Selecting a row opens its checklist. Approval acts on the selected set when present. Save selected cases remains disabled until at least one selected case is approved and has a valid non-conflicting ID. Selection and approval counts are shown separately.
+
+
+The import-review Diagnosis column displays disease names from the case's selected checklist diagnoses, not the source diagnosis paragraph. It updates when checklist selections change. Raw file diagnosis notes remain separately editable in the case inspector. Cases without selected diagnoses explicitly show No diagnosis selected; an empty match is never presented as a confirmed disease.
