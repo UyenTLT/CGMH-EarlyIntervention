@@ -79,7 +79,7 @@ with tempfile.TemporaryDirectory() as temp:
             assert page.locator('#overview #recordForm').is_visible()
             assert page.locator('#editorDialog').count()==0
             assert page.locator('[name=patientName], [name=chartNo], [name=examDate], [name=physician]').count() == 0
-            page.locator('[name=caseId]').fill('STATIC-001')
+            page.locator('#recordForm [name=caseId]').fill('STATIC-001')
             # Search both English and Chinese regardless of interface language.
             page.locator('#diagnosisSearch').fill('spastic')
             page.locator('#diagnoses input:visible').first.check()
@@ -204,12 +204,38 @@ with tempfile.TemporaryDirectory() as temp:
             page.locator('[data-tab=records]').click()
             page.locator('#recordRows').get_by_text('STATIC-001', exact=True).wait_for()
             page.locator('#caseWorkbook').set_input_files({'name':'cases.csv','mimeType':'text/csv','buffer':b'CASE ID,Diagnosis\nIMPORT-003,Autism\n'})
-            page.locator('#pendingImportBar').wait_for(state='visible')
-            assert page.locator('#export').is_disabled()
-            page.locator('#saveImported').click()
+            page.locator('#importReviewDialog').wait_for(state='visible')
+            assert page.locator('#commitImport').is_disabled()
+            page.locator('#importReviewRows [data-review-open]').first.click()
+            page.locator('#importReviewForm [type=submit]').click()
+            page.locator('#commitImport').click()
             page.locator('#pendingImportBar').wait_for(state='hidden')
-            page.locator('#recordRows').get_by_text('cases-IMPORT-003',exact=True).wait_for()
-            assert page.locator('#selectedCases button').count()==1
+            page.locator('#recordRows').get_by_text('IMPORT-003',exact=True).wait_for()
+            assert page.locator('#selectedCases button').count()==0
+            page.locator('#caseWorkbook').set_input_files({'name':'review.csv','mimeType':'text/csv','buffer':b'CASE ID,Diagnosis\nSTATIC-001,Autism\nDUP,Autism\nDUP,Epilepsy\n,Speech delay\nNEW4,Autism\n'})
+            page.locator('#importReviewDialog').wait_for(state='visible')
+            assert page.locator('#importReviewRows tr').count()==5
+            assert len(page.request.get(API+'/api/records',headers=auth).json())==2
+            page.once('dialog',lambda dialog:dialog.accept())
+            page.locator('#approveImportResults').click()
+            assert '1' in page.locator('#importReviewSelection').inner_text()
+            page.locator('#commitImport').click()
+            page.wait_for_function('document.querySelectorAll("#importReviewRows tr").length===4')
+            assert len(page.request.get(API+'/api/records',headers=auth).json())==3
+            missing=page.locator('#importReviewRows tr').filter(has_text='Missing Case ID')
+            # Current test language is English after reload.
+            missing.locator('[data-review-open]').click()
+            page.locator('#importReviewForm [name=caseId]').fill('FIXED-ID')
+            page.locator('#importReviewForm [type=submit]').click()
+            page.locator('#commitImport').click()
+            page.wait_for_function('document.querySelectorAll("#importReviewRows tr").length===3')
+            assert len(page.request.get(API+'/api/records',headers=auth).json())==4
+            page.locator('#closeImportReview').click()
+            page.locator('#saveImported').click()
+            assert page.locator('#importReviewRows tr').count()==3
+            page.once('dialog',lambda dialog:dialog.accept())
+            page.locator('#discardReviewImport').click()
+            page.locator('#importReviewDialog').wait_for(state='hidden')
             # Large libraries show 100 options at a time without requiring typing.
             import json
             library=[{'id':f'scale-{i}','caseId':f'SCALE-{i:04d}','diagnoses':[]} for i in range(2232)]

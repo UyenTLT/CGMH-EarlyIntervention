@@ -89,6 +89,9 @@ class Record(BaseModel):
     classificationStatus: str = "review"
     diagnosisNotes: str = ""
     management: list[str] = Field(default_factory=list)
+    functionalNotes: str = ""
+    managementNotes: str = ""
+    importSource: dict[str, Any] = Field(default_factory=dict)
     medication: str = ""
     sourceText: str = ""
     importedAt: str = ""
@@ -272,6 +275,11 @@ def frontend_script():
     return FileResponse(ROOT / "static" / "app.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
+@app.get("/import-review.js")
+def import_review_script():
+    return FileResponse(ROOT / "static" / "import-review.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/diagnosis-data.js")
 def diagnosis_data_script():
     return FileResponse(ROOT / "static" / "diagnosis-data.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
@@ -402,7 +410,7 @@ def save_record(body: Record):
         if old is None:
             rows.insert(0, row)
         else:
-            for key in ("patientName", "chartNo", "examDate", "physician"):
+            for key in ("patientName", "chartNo", "examDate", "physician", "importSource"):
                 if key not in body.model_fields_set and key in rows[old]:
                     row[key] = rows[old][key]
             rows[old] = row
@@ -416,18 +424,21 @@ def save_records_bulk(records: list[Record]):
         raise HTTPException(413, "Too many records in one save")
     with STATE_LOCK:
         rows = read_records()
-        known_cases = {row.get("caseId") for row in rows if row.get("caseId")}
+        known_cases = {str(row.get("caseId") or "").strip().casefold() for row in rows if row.get("caseId")}
         saved, skipped = [], 0
         for item in records:
             row = item.model_dump()
-            if row.get("caseId") and row["caseId"] in known_cases:
+            row["caseId"] = row["caseId"].strip()
+            if not row["caseId"]:
+                raise HTTPException(422, "Every imported record needs a Case ID")
+            if row["caseId"].casefold() in known_cases:
                 skipped += 1
                 continue
             row["id"] = row.get("id") or secrets.token_hex(8)
             row["importedAt"] = row.get("importedAt") or datetime.now().isoformat(timespec="seconds")
             rows.insert(0, row)
             if row.get("caseId"):
-                known_cases.add(row["caseId"])
+                known_cases.add(row["caseId"].casefold())
             saved.append(row)
         if saved:
             write_records(rows)
@@ -493,22 +504,25 @@ async def import_cases(file: UploadFile = File(...)):
             if table and re.search(r"\bcase\s*(?:id|no|number)\b", header_probe):
                 datasets = [(Path(name).stem or "TXT", table)]
             else:
-                fields = {"case": "Case ID", "patient": "Patient Name", "chart": "Chart No", "diagnosis": "Diagnosis", "date": "Exam Date", "physician": "Physician"}
+                fields = {"case": "Case ID", "patient": "Patient Name", "chart": "Chart No", "diagnosis": "Diagnosis", "date": "Exam Date", "physician": "Physician", "functional": "Functional Classifications", "management": "Treatment Plan", "medication": "Medication"}
                 label_patterns = {
-                    "case": re.compile(r"^\s*(?:case\s*(?:id|no\.?|number)|caseid)\s*[:：=]\s*(.*)$", re.I),
+                    "case": re.compile(r"^\s*(?:case\s*(?:id|no\.?|number)|caseid|個案編號)\s*[:：=]\s*(.*)$", re.I),
                     "patient": re.compile(r"^\s*(?:patient(?:\s*name)?|name|病患姓名|姓名)\s*[:：=]\s*(.*)$", re.I),
                     "chart": re.compile(r"^\s*(?:chart\s*(?:no\.?|number)|medical\s*record\s*(?:no\.?|number)|病歷號碼?|病歷編號)\s*[:：=]\s*(.*)$", re.I),
                     "diagnosis": re.compile(r"^\s*(?:clinical\s*)?diagnosis(?:\s*(?:text|summary))?\s*[:：=]\s*(.*)$|^\s*診斷(?:內容)?\s*[:：=]\s*(.*)$", re.I),
                     "date": re.compile(r"^\s*(?:exam(?:ination)?\s*date|date|檢查日期)\s*[:：=]\s*(.*)$", re.I),
+                    "functional": re.compile(r"^\s*(?:functional(?:\s*classifications?)?|功能性診斷分類|功能分類)\s*[:：=]\s*(.*)$", re.I),
+                    "management": re.compile(r"^\s*(?:treatment(?:\s*plan)?|management|rehabilitation|處置(?:計畫)?|處置與介入)\s*[:：=]\s*(.*)$", re.I),
+                    "medication": re.compile(r"^\s*(?:medication(?:\s*/?\s*notes)?|medicine|藥物(?:／備註)?)\s*[:：=]\s*(.*)$", re.I),
                     "physician": re.compile(r"^\s*(?:physician|doctor|醫師)\s*[:：=]\s*(.*)$", re.I),
                 }
-                records, current = [], {}
+                records, current, active = [], {}, None
                 for line in lines + [""]:
                     stripped = line.strip()
                     if not stripped:
                         if current.get("Case ID"):
                             records.append(tuple(current.get(fields[key], "") for key in fields))
-                        current = {}
+                        current, active = {}, None
                         continue
                     matched = False
                     for key, pattern in label_patterns.items():
@@ -521,73 +535,18 @@ async def import_cases(file: UploadFile = File(...)):
                         value = next((part for part in match.groups() if part is not None), "").strip()
                         header = fields[key]
                         current[header] = f"{current[header]} {value}".strip() if key == "diagnosis" and current.get(header) else value
+                        active = header if key in {"diagnosis", "functional", "management", "medication"} else None
                         matched = True
                         break
-                    if not matched and current.get("Diagnosis"):
-                        current["Diagnosis"] = f"{current['Diagnosis']} {stripped}".strip()
+                    if not matched and active:
+                        current[active] = f"{current.get(active, '')}\n{stripped}".strip()
                 datasets = [(Path(name).stem or "TXT", [tuple(fields.values()), *records])]
-    from app.classifier import classify_text
-    existing = read_records()
-    known_case_ids = {row.get("caseId") for row in existing if row.get("caseId")}
-    created, skipped, suggested_count, review_count, found_case_sheet = [], 0, 0, 0, False
-    aliases = {
-        "case": {"case id", "case no", "case number", "caseid", "case"},
-        "patient": {"patient", "patient name", "name", "姓名", "病患姓名"},
-        "chart": {"chart no", "chart number", "medical record no", "medical record number", "病歷號碼", "病歷編號"},
-        "diagnosis": {"diagnosis", "diagnosis text", "diagnosis summary", "clinical diagnosis", "診斷", "診斷內容"},
-        "date": {"exam date", "examination date", "date", "檢查日期"},
-        "physician": {"physician", "doctor", "醫師"},
-    }
-    def norm_header(value: Any) -> str:
-        return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", str(value or "").strip().casefold()).strip()
-    for sheet_title, table in datasets:
-        if not table:
-            continue
-        raw_headers = list(table[0])
-        iterator = iter(table[1:])
-        headers = [norm_header(value) for value in raw_headers]
-        columns = {key: next((i for i, header in enumerate(headers) if header in values), None) for key, values in aliases.items()}
-        if columns["case"] is None:
-            continue
-        found_case_sheet = True
-        for values in iterator:
-            raw_case = values[columns["case"]] if columns["case"] < len(values) else None
-            if raw_case is None or not str(raw_case).strip() or str(raw_case).strip().casefold() == "case id":
-                continue
-            raw_case_value = str(int(raw_case)) if isinstance(raw_case, float) and raw_case.is_integer() else str(raw_case).strip()
-            # Some workbooks put several case identifiers in one cell.
-            case_values = [part.strip() for part in re.split(r"[\r\n,，;；|]+", raw_case_value) if part.strip()]
-            cell = lambda key: values[columns[key]] if columns[key] is not None and columns[key] < len(values) else None
-            diagnosis = str(cell("diagnosis") or "").strip()
-            if not diagnosis:
-                excluded_cols = {columns[key] for key in ("case", "patient", "chart", "date", "physician") if columns[key] is not None}
-                diagnosis = "; ".join(f"{raw_headers[i]}: {value}" for i, value in enumerate(values) if i not in excluded_cols and i < len(raw_headers) and value is not None and str(value).strip())
-            excluded_cols = {columns[key] for key in ("patient", "chart", "date", "physician") if columns[key] is not None}
-            source_text = " | ".join(f"{raw_headers[i]}: {value}" for i, value in enumerate(values) if i not in excluded_cols and i < len(raw_headers) and value is not None and str(value).strip())
-            result = classify_text(diagnosis) if diagnosis else {"suggestions": [], "review": []}
-            codes = [suggestion["value"] for suggestion in result["suggestions"]]
-            labels = [suggestion["label"] for suggestion in result["suggestions"]]
-            for case_value in case_values:
-                case_id = f"{sheet_title}-{case_value}"
-                if case_id in known_case_ids:
-                    skipped += 1
-                    continue
-                record = {
-                    "id": secrets.token_hex(8), "caseId": case_id, "functional": [], "diagnoses": codes,
-                    "diagnosisLabels": labels, "classificationReview": result.get("review", []),
-                    "classificationStatus": "suggested" if codes else "review", "diagnosisNotes": diagnosis, "management": [],
-                    "medication": "", "sourceText": source_text,
-                    "importedAt": datetime.now().isoformat(timespec="seconds"),
-                }
-                known_case_ids.add(case_id)
-                created.append(record)
-                if codes:
-                    suggested_count += 1
-                else:
-                    review_count += 1
-    if not found_case_sheet:
-        raise HTTPException(422, "No table with a CASE ID column was found")
-    return {"imported": len(created), "skipped": skipped, "suggested": suggested_count, "needsReview": review_count, "records": created}
+    from app.importing import preview_import
+    try:
+        return preview_import(datasets, read_records(), file.filename or name)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
 
 
 @app.delete("/api/records/{record_id}", dependencies=[Depends(auth)])
@@ -741,10 +700,10 @@ def build_checklist_workbook(rows: list[dict[str, Any]], lang: str = "en") -> Wo
         details.merge_cells(start_row=start + 1, start_column=2, end_row=start + 1, end_column=4)
         diagnosis_items = record.get("diagnosisLabels") or record.get("diagnoses", [])
         sections = [
-            ("I. FUNCTIONAL CLASSIFICATION", listed(record.get("functional", []))),
+            ("I. FUNCTIONAL CLASSIFICATION", listed(record.get("functional", [])) + ("\n" + record["functionalNotes"] if record.get("functionalNotes") else "")),
             ("II. DIAGNOSIS", listed(diagnosis_items)),
             ("Diagnosis notes", text(record.get("diagnosisNotes"))),
-            ("III. MANAGEMENT & INTERVENTIONS", listed(record.get("management", []))),
+            ("III. MANAGEMENT & INTERVENTIONS", listed(record.get("management", [])) + ("\n" + record["managementNotes"] if record.get("managementNotes") else "")),
             ("Medication / notes", text(record.get("medication"))),
             ("Record ID", text(record.get("id"))),
         ]
@@ -847,7 +806,7 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[]), lang: str =
             return "\n".join(catalog.get(str(value), str(value)) for value in values or [])
 
         fields = ["CASE ID", "Diagnosis Groups", "Functional Classifications", "Diagnostic Items", "Diagnosis notes", "Treatment Plan", "Medication"]
-        values = [[str(row.get("caseId") or ""), primary_diagnosis_group(row), translated(row.get("functional", [])), translated(row.get("diagnosisLabels") or row.get("diagnoses", [])), str(row.get("diagnosisNotes") or ""), translated(row.get("management", [])), str(row.get("medication") or "")] for row in rows]
+        values = [[str(row.get("caseId") or ""), primary_diagnosis_group(row), translated(row.get("functional", [])) + ("\n" + row["functionalNotes"] if row.get("functionalNotes") else ""), translated(row.get("diagnosisLabels") or row.get("diagnoses", [])), str(row.get("diagnosisNotes") or ""), translated(row.get("management", [])) + ("\n" + row["managementNotes"] if row.get("managementNotes") else ""), str(row.get("medication") or "")] for row in rows]
         if format == "csv":
             def safe_cell(value):
                 # CSV spreadsheet programs interpret leading formula characters.
@@ -871,7 +830,7 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[]), lang: str =
             document.add_heading(record.get("caseId") or "Case ID missing", level=1)
             table = document.add_table(rows=0, cols=2)
             table.style = "Light Shading Accent 1"
-            fields = [("Record ID", record.get("id", "")), ("Case ID", record.get("caseId", "")), ("Primary diagnosis group", primary_diagnosis_group(record)), ("Functional classifications", "; ".join(record.get("functional", []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []))), ("Medication / notes", record.get("medication", ""))]
+            fields = [("Record ID", record.get("id", "")), ("Case ID", record.get("caseId", "")), ("Primary diagnosis group", primary_diagnosis_group(record)), ("Functional classifications", "; ".join(record.get("functional", []) + ([record["functionalNotes"]] if record.get("functionalNotes") else []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []) + ([record["managementNotes"]] if record.get("managementNotes") else []))), ("Medication / notes", record.get("medication", ""))]
             for label, value in fields:
                 cells = table.add_row().cells
                 cells[0].text, cells[1].text = label, str(value)
@@ -899,7 +858,7 @@ def export(format: str = "xlsx", ids: list[str] = Query(default=[]), lang: str =
         story = [Paragraph("Hospital Rehabilitation Checklist Records", styles["Title"]), Spacer(1, 12)]
         for record in rows:
             story.append(Paragraph(str(record.get("caseId") or "Case ID missing"), styles["Heading2"]))
-            data = [["Field", "Value"]] + [[label, str(value or "")] for label, value in [("Record ID", record.get("id")), ("Case ID", record.get("caseId")), ("Primary diagnosis group", primary_diagnosis_group(record)), ("Functional classifications", "; ".join(record.get("functional", []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []))), ("Medication / notes", record.get("medication"))]]
+            data = [["Field", "Value"]] + [[label, str(value or "")] for label, value in [("Record ID", record.get("id")), ("Case ID", record.get("caseId")), ("Primary diagnosis group", primary_diagnosis_group(record)), ("Functional classifications", "; ".join(record.get("functional", []) + ([record["functionalNotes"]] if record.get("functionalNotes") else []))), ("Diagnosis", "; ".join(record.get("diagnosisLabels", []) + ([record["diagnosisNotes"]] if record.get("diagnosisNotes") else []))), ("Treatment plan", "; ".join(record.get("management", []) + ([record["managementNotes"]] if record.get("managementNotes") else []))), ("Medication / notes", record.get("medication"))]]
             table = Table([[Paragraph(escape(str(cell)), styles["BodyText"]) for cell in row] for row in data], colWidths=[1.8*inch, 8.0*inch], repeatRows=1)
             table.setStyle(TableStyle([("BACKGROUND", (0,0),(-1,0), colors.HexColor("#bd7137")), ("TEXTCOLOR", (0,0),(-1,0), colors.white), ("GRID", (0,0),(-1,-1), .4, colors.HexColor("#dedede")), ("VALIGN", (0,0),(-1,-1), "TOP"), ("PADDING", (0,0),(-1,-1), 6)]))
             story.extend([table, Spacer(1, 12)])

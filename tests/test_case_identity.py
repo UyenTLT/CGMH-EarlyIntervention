@@ -32,7 +32,7 @@ class CaseIdentityTests(unittest.TestCase):
         with patch.object(main, 'read_records', return_value=[]):
             result = asyncio.run(main.import_cases(UploadFile(filename='cases.csv', file=io.BytesIO(raw))))
         row = result['records'][0]
-        self.assertTrue(row['caseId'].endswith('C-123'))
+        self.assertEqual(row['caseId'],'C-123')
         for key in ['patientName', 'chartNo', 'examDate', 'physician']:
             self.assertNotIn(key, row)
         self.assertNotIn('REMOVED-', row['sourceText'])

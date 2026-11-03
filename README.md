@@ -112,3 +112,9 @@ Case ID filtering also offers a checkbox dropdown: choose one or multiple IDs wi
 
 
 Records has a Select all action that selects every matching saved record across pages (not only the visible page). Bulk Delete appears only after selection and retains its confirmation prompt. Case ID suggestions prioritize exact matches and then prefix matches, highlight the matching text, and support arrow-key navigation. Overview keeps its activity summary and inline editor without a recent-cases table. Routine connection/wakeup is silent; genuine connection failures still show a reconnect action.
+
+## Review imports before saving
+
+XLSX/CSV/TXT case lists now open a separate paginated review dialog. Preview rows never appear in Records and no database writes happen during extraction. Explicit English/Traditional Chinese clinical headers identify Case ID, diagnosis, functional classification, treatment, and medication. Unknown columns are ignored rather than guessed as diagnoses. Unmatched functional/treatment text is retained in notes and included in exports. Original Case IDs are preserved; existing legacy sheet-prefixed IDs are checked during duplicate review without migrating stored records.
+
+Review shows the source file/sheet/row, extracted diagnosis, missing/duplicate ID problems and unreviewed/approved status. Review an individual case to edit fields and checklist selections, or explicitly approve valid filtered results in bulk after confirmation. Only approved selected cases are saved. Missing/duplicate IDs are blocked until corrected or excluded. Saving only some rows retains the remaining preview; closing review keeps it available in the current page session. Refreshing/closing the browser does not persist an unsaved review. Batch saving rechecks IDs on the server, preserves successful batches if a later request fails, and leaves remaining rows for retry. Diagnosis suggestions still require clinical review.
